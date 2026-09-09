@@ -96,7 +96,47 @@ class GeminiNarrativeDirector:
             ground_truth_file = os.path.join(base_dir, "data", "map1_ground_truth.json")
 
         self.ground_truth = self._load_ground_truth(ground_truth_file)
-        self.api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+        self.api_key = self._load_api_key()
+
+    def _load_api_key(self) -> str:
+        """Loads GEMINI_API_KEY from environment or .env files with multiple fallbacks."""
+        # 1. Try python-dotenv on project root and backend folder
+        try:
+            from dotenv import load_dotenv
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            root_dir = os.path.dirname(base_dir)
+            load_dotenv(os.path.join(root_dir, ".env"), override=False)
+            load_dotenv(os.path.join(base_dir, ".env"), override=False)
+        except Exception:
+            pass
+
+        key = os.environ.get("GEMINI_API_KEY", "").strip()
+        if key:
+            return key
+
+        # 2. Manual fallback parser for .env
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        candidate_paths = [
+            os.path.join(os.path.dirname(base_dir), ".env"),
+            os.path.join(base_dir, ".env")
+        ]
+        for p in candidate_paths:
+            if os.path.exists(p):
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith("#") and "=" in line:
+                                k, v = line.split("=", 1)
+                                if k.strip() == "GEMINI_API_KEY":
+                                    val = v.strip().strip('"').strip("'")
+                                    if val:
+                                        os.environ["GEMINI_API_KEY"] = val
+                                        return val
+                except Exception:
+                    pass
+
+        return ""
 
     def _load_ground_truth(self, path: str) -> Dict[str, Any]:
         if os.path.exists(path):
@@ -112,6 +152,7 @@ class GeminiNarrativeDirector:
         Generates the Node 02 Manifest and Story Briefing/Debriefing based on Map 1 telemetry.
         Tries Gemini API first; falls back to deterministic heuristic director if unavailable.
         """
+        self.api_key = self._load_api_key()
         if self.api_key:
             try:
                 manifest_dict = self._call_gemini(profile, telemetry, seed)
