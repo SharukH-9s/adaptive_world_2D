@@ -179,22 +179,40 @@ namespace AdaptiveWorld2D.Mission
         private void OnMission2Ready(MissionManifest manifest)
         {
             currentMission = 2;
-            string briefing = $"MISSION 2: ASSASSINATE TARGET\n\n" +
-                              $"Target Location: {manifest.target.location_label}\n" +
-                              $"Target Armor: {manifest.target.armor} (HP: {manifest.target.health})\n" +
-                              $"Guards: {manifest.guards.count} units (Vision: {manifest.guards.vision_range}m)\n" +
-                              $"Weather: {manifest.environment.ambient_label}\n" +
-                              $"World Adapted to playstyle: {manifest.player_archetype}\n\n" +
-                              $"[Loading Map 2 in 4 seconds...]";
 
-            SetObjective($"MISSION 1 COMPLETE! Transitioning to Map 2...");
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+
+            if (!string.IsNullOrEmpty(manifest.narrative_debriefing))
+            {
+                sb.AppendLine("<b><color=#FFD700>=== HANDLER DEBRIEFING ===</color></b>");
+                sb.AppendLine(manifest.narrative_debriefing);
+                sb.AppendLine();
+            }
+
+            string title = !string.IsNullOrEmpty(manifest.mission_title) ? manifest.mission_title : "NODE 02: FIRST BLOOD";
+            sb.AppendLine($"<b><color=#00E5FF>=== {title.ToUpper()} ===</color></b>");
+
+            if (!string.IsNullOrEmpty(manifest.mission_briefing))
+            {
+                sb.AppendLine(manifest.mission_briefing);
+                sb.AppendLine();
+            }
+
+            sb.AppendLine($"<b>Target:</b> {manifest.target.location_label} ({manifest.target.armor.ToUpper()} Armor, {manifest.target.health} HP)");
+            sb.AppendLine($"<b>Security:</b> {manifest.guards.count} Guards | <b>Weather:</b> {manifest.environment.ambient_label}");
+            sb.AppendLine($"<b>Director Assessment:</b> Adapted for <color=#FF5555>{manifest.player_archetype}</color>");
+            sb.AppendLine("\n<i>[Deploying to Next Operation in 6 seconds...]</i>");
+
+            string briefing = sb.ToString();
+
+            SetObjective($"MISSION 1 COMPLETE! Transitioning to {title}...");
 
             if (debriefingText != null) debriefingText.text = briefing;
             if (briefingPanel != null) briefingPanel.SetActive(true);
 
             Debug.Log($"[MissionManager] {briefing}");
 
-            StartCoroutine(LoadMap2Routine(4.0f));
+            StartCoroutine(LoadMap2Routine(6.0f));
         }
 
         private System.Collections.IEnumerator LoadMap2Routine(float delay)

@@ -1,0 +1,225 @@
+{
+  "map_id": "NODE_01_ROCK_BOTTOM",
+  "map_name": "Pauper Streets — Slum Exodus",
+  "dimensions": {
+    "min_x": -30.0,
+    "max_x": 30.0,
+    "min_y": -20.0,
+    "max_y": 20.0,
+    "width": 60.0,
+    "height": 40.0
+  },
+  "sectors": {
+    "north_industrial": {
+      "bounds": { "min_x": -30.0, "max_x": 30.0, "min_y": 6.0, "max_y": 20.0 },
+      "theme": "Warehouses, heavy security, fuel storage, optional high-value loot",
+      "risk_level": "HIGH"
+    },
+    "central_boulevard": {
+      "bounds": { "min_x": -30.0, "max_x": 30.0, "min_y": -5.0, "max_y": 5.0 },
+      "theme": "4-lane asphalt highway, police patrols, moving civilians, driveable vehicles, roadblock checkpoint",
+      "risk_level": "MEDIUM"
+    },
+    "south_alleys": {
+      "bounds": { "min_x": -30.0, "max_x": 30.0, "min_y": -20.0, "max_y": -5.0 },
+      "theme": "Narrow corridors, rival gang thugs, wire fence shortcuts, underground gun shop",
+      "risk_level": "MEDIUM_STEALTH"
+    }
+  },
+  "key_locations": {
+    "player_spawn": { "id": "spawn_player", "pos": [-25.0, 0.0, 0.0], "notes": "West entrance of Pauper Streets" },
+    "underground_gun_shop": { "id": "shop_gun", "pos": [0.0, -7.0, 0.0], "notes": "Mandatory objective: Acquire weapon to survive" },
+    "cash_briefcase": { "id": "loot_briefcase", "pos": [-7.0, 14.0, 0.0], "notes": "Optional high-risk loot inside North Warehouse A" },
+    "informant": { "id": "npc_informant", "pos": [-2.0, -7.0, 0.0], "notes": "Underworld contact outside gun shop" },
+    "extraction_exit": { "id": "trigger_extraction", "pos": [28.0, 0.0, 0.0], "notes": "East highway checkpoint escape" }
+  },
+  "choke_points": [
+    { "id": "choke_east_checkpoint", "pos": [17.0, 0.0], "guarded_by": ["Cop_Checkpoint", "Barrier_EastRoad_L", "Barrier_EastRoad_R", "Car_PoliceCruiser"] },
+    { "id": "choke_north_warehouse_entrance", "pos": [-3.0, 8.0], "guarded_by": ["Cop_NorthEntrance", "Fence_NorthYard"] },
+    { "id": "choke_south_alley_mouth", "pos": [-4.0, -6.0], "guarded_by": ["Civilian_SouthAlley", "Fence_SouthAlley_02"] },
+    { "id": "choke_south_alley_nest", "pos": [-10.0, -9.0], "guarded_by": ["Barrel_SouthAlley", "GangThug_01", "GangThug_02"] }
+  ],
+  "registered_assets": {
+    "vehicles": [
+      { "id": "Car_SportsRed", "type": "veh_sports_car", "pos": [-20.0, 3.0], "hp": 120, "speed": 14.5, "role": "Fast getaway vehicle near player spawn" },
+      { "id": "Car_SedanBlue", "type": "veh_civilian_sedan", "pos": [4.0, -2.0], "hp": 150, "speed": 9.0, "role": "Mid-boulevard mobile cover" },
+      { "id": "Car_SedanBlack", "type": "veh_civilian_sedan", "pos": [-6.0, -13.0], "hp": 150, "speed": 9.0, "role": "South alley hidden vehicle" },
+      { "id": "Car_PoliceCruiser", "type": "veh_police_cruiser", "pos": [20.0, 2.0], "hp": 180, "speed": 11.0, "role": "Law enforcement cruiser at east checkpoint" }
+    ],
+    "buildings": [
+      { "id": "Building_WarehouseA", "pos": [-14.0, 15.0], "size": [12.0, 8.0], "type": "struct_building_brick", "solid": true },
+      { "id": "Building_WarehouseB", "pos": [10.0, 15.0], "size": [16.0, 8.0], "type": "struct_building_brick", "solid": true },
+      { "id": "Building_StorefrontNorth", "pos": [-5.0, 6.0], "size": [20.0, 4.0], "type": "struct_building_brick", "solid": true },
+      { "id": "Building_StorefrontEast", "pos": [22.0, 6.0], "size": [10.0, 4.0], "type": "struct_building_brick", "solid": true },
+      { "id": "Building_SlumWest", "pos": [-22.0, -8.0], "size": [8.0, 6.0], "type": "struct_building_brick", "solid": true },
+      { "id": "Building_SlumEast", "pos": [5.0, -10.0], "size": [10.0, 6.0], "type": "struct_building_brick", "solid": true }
+    ],
+    "cover_and_barriers": [
+      { "id": "Barrier_EastRoad_L", "pos": [17.0, 2.0], "type": "barrier_concrete", "hp": 100, "destructible": true, "bullet_pass": false },
+      { "id": "Barrier_EastRoad_R", "pos": [17.0, -2.0], "type": "barrier_concrete", "hp": 100, "destructible": true, "bullet_pass": false },
+      { "id": "Barrier_Street_01", "pos": [-8.0, 1.5], "type": "barrier_concrete", "hp": 100, "destructible": true, "bullet_pass": false },
+      { "id": "Barrier_Street_02", "pos": [8.0, 1.5], "type": "barrier_concrete", "hp": 100, "destructible": true, "bullet_pass": false },
+      { "id": "Fence_SouthAlley_01", "pos": [-16.0, -6.0], "type": "fence_wire_gate", "hp": 40, "destructible": true, "bullet_pass": true },
+      { "id": "Fence_SouthAlley_02", "pos": [-3.0, -6.0], "type": "fence_wire_gate", "hp": 40, "destructible": true, "bullet_pass": true },
+      { "id": "Fence_NorthYard", "pos": [-3.0, 7.0], "type": "fence_wire_gate", "hp": 40, "destructible": true, "bullet_pass": true },
+      { "id": "Crate_Alley_01", "pos": [-12.0, -9.0], "type": "crate_wooden", "hp": 30, "destructible": true, "bullet_pass": false },
+      { "id": "Crate_Alley_02", "pos": [-8.0, -9.0], "type": "crate_wooden", "hp": 30, "destructible": true, "bullet_pass": false },
+      { "id": "Crate_North_01", "pos": [-3.0, 12.0], "type": "crate_wooden", "hp": 30, "destructible": true, "bullet_pass": false }
+    ],
+    "hazards": [
+      { "id": "Barrel_NorthA", "pos": [-5.0, 12.0], "type": "hazard_barrel_fuel", "hp": 20, "blast_damage": 90, "blast_radius": 3.0 },
+      { "id": "Barrel_NorthB", "pos": [-3.0, 12.0], "type": "hazard_barrel_fuel", "hp": 20, "blast_damage": 90, "blast_radius": 3.0 },
+      { "id": "Barrel_SouthAlley", "pos": [-10.0, -9.0], "type": "hazard_barrel_fuel", "hp": 20, "blast_damage": 90, "blast_radius": 3.0 },
+      { "id": "Barrel_EastRoad", "pos": [15.0, 3.0], "type": "hazard_barrel_fuel", "hp": 20, "blast_damage": 90, "blast_radius": 3.0 }
+    ],
+    "characters": [
+      {
+        "id": "Cop_Boulevard_West",
+        "type": "actor_cop_patrol",
+        "category": "law_enforcement",
+        "pos": [-15.0, 2.0],
+        "route": [[-15.0, 2.0], [-5.0, 2.0]],
+        "hp": 60,
+        "speed": 3.0,
+        "chase_speed": 4.5,
+        "vision_range": 8.0,
+        "vision_angle": 70.0,
+        "weapon": "revolver",
+        "behavior": "Patrols western highway. Sounds whistle if alarmed."
+      },
+      {
+        "id": "Cop_Boulevard_East",
+        "type": "actor_cop_patrol",
+        "category": "law_enforcement",
+        "pos": [5.0, -2.0],
+        "route": [[5.0, -2.0], [15.0, -2.0]],
+        "hp": 60,
+        "speed": 3.0,
+        "chase_speed": 4.5,
+        "vision_range": 8.0,
+        "vision_angle": 70.0,
+        "weapon": "revolver",
+        "behavior": "Patrols eastern highway. Alerts checkpoint if attacked."
+      },
+      {
+        "id": "Cop_Checkpoint",
+        "type": "actor_cop_patrol",
+        "category": "law_enforcement",
+        "pos": [22.0, 0.0],
+        "route": [[22.0, 2.0], [22.0, -2.0]],
+        "hp": 60,
+        "speed": 1.5,
+        "chase_speed": 4.5,
+        "vision_range": 10.0,
+        "vision_angle": 80.0,
+        "weapon": "revolver",
+        "behavior": "Stationary guard blocking East Highway extraction."
+      },
+      {
+        "id": "Cop_NorthEntrance",
+        "type": "actor_cop_patrol",
+        "category": "law_enforcement",
+        "pos": [-3.0, 8.0],
+        "route": [[-8.0, 8.0], [3.0, 8.0]],
+        "hp": 60,
+        "speed": 2.5,
+        "chase_speed": 4.5,
+        "vision_range": 8.0,
+        "vision_angle": 70.0,
+        "weapon": "revolver",
+        "behavior": "Guards access road to North Warehouses."
+      },
+      {
+        "id": "SWAT_WarehouseGuard",
+        "type": "actor_cop_swat",
+        "category": "heavy_law",
+        "pos": [-7.0, 14.0],
+        "route": [[-10.0, 14.0], [-4.0, 14.0]],
+        "hp": 120,
+        "speed": 2.0,
+        "chase_speed": 3.5,
+        "vision_range": 12.0,
+        "vision_angle": 85.0,
+        "armor_reduction": 0.5,
+        "weapon": "smg",
+        "behavior": "Heavily armored protector guarding the cash briefcase inside Warehouse A."
+      },
+      {
+        "id": "Civilian_Blvd_N1",
+        "type": "actor_civilian",
+        "category": "neutral",
+        "pos": [-10.0, 4.0],
+        "hp": 25,
+        "behavior": "Pedestrian walking north sidewalk. Panics upon gunfire."
+      },
+      {
+        "id": "Civilian_Blvd_N2",
+        "type": "actor_civilian",
+        "category": "neutral",
+        "pos": [5.0, 4.0],
+        "hp": 25,
+        "behavior": "Pedestrian walking near eastern storefronts."
+      },
+      {
+        "id": "Civilian_Slum_01",
+        "type": "actor_civilian",
+        "category": "neutral",
+        "pos": [-22.0, 3.0],
+        "hp": 25,
+        "behavior": "Slum dweller near player spawn point."
+      },
+      {
+        "id": "Civilian_Slum_02",
+        "type": "actor_civilian",
+        "category": "neutral",
+        "pos": [-18.0, -2.0],
+        "hp": 25,
+        "behavior": "Slum dweller loitering south of starting highway."
+      },
+      {
+        "id": "Civilian_SouthAlley",
+        "type": "actor_civilian",
+        "category": "neutral",
+        "pos": [-4.0, -7.0],
+        "hp": 25,
+        "behavior": "Bystander near alley entrance. Runs towards police if threatened."
+      },
+      {
+        "id": "GangThug_01",
+        "type": "actor_gang_thug",
+        "category": "hostile_gang",
+        "pos": [-13.0, -10.0],
+        "route": [[-15.0, -10.0], [-10.0, -10.0]],
+        "hp": 70,
+        "speed": 3.8,
+        "chase_speed": 5.0,
+        "vision_range": 9.0,
+        "vision_angle": 75.0,
+        "weapon": "shotgun",
+        "behavior": "Aggressive flanker controlling western alley section."
+      },
+      {
+        "id": "GangThug_02",
+        "type": "actor_gang_thug",
+        "category": "hostile_gang",
+        "pos": [-18.0, -12.0],
+        "route": [[-20.0, -12.0], [-16.0, -12.0]],
+        "hp": 70,
+        "speed": 3.8,
+        "chase_speed": 5.0,
+        "vision_range": 9.0,
+        "vision_angle": 75.0,
+        "weapon": "shotgun",
+        "behavior": "Deep alley sentry guarding back door escape route."
+      },
+      {
+        "id": "NPC_Informant",
+        "type": "actor_informant",
+        "category": "quest_npc",
+        "pos": [-2.0, -7.0],
+        "hp": 40,
+        "behavior": "Underworld contact outside gun shop; provides mission guidance."
+      }
+    ]
+  }
+}

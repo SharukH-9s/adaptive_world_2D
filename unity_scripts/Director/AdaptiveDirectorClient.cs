@@ -61,6 +61,8 @@ namespace AdaptiveWorld2D.Director
         public string mission_title;
         public string player_archetype;
         public string mission_briefing;
+        public string narrative_debriefing;
+        public string psychological_deduction;
         public TargetManifest target;
         public GuardsManifest guards;
         public EnvironmentManifest environment;

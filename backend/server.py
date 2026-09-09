@@ -31,6 +31,7 @@ from .telemetry import (
 )
 from .profiler import build_profile, PlayerProfile
 from .target_solver import M2TargetSolver
+from .gemini_director import GeminiNarrativeDirector
 
 app = FastAPI(
     title="Adaptive World Director 2D",
@@ -47,6 +48,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 solver = M2TargetSolver()
+director = GeminiNarrativeDirector()
 
 
 # ---------------------------------------------------------------------------
@@ -189,8 +191,9 @@ def get_profile():
 @app.post("/api/mission/solve")
 def solve_mission(req: SolveRequest):
     p = state.refresh()
-    manifest = solver.solve(p, seed=req.seed)
-    state.last_manifest = manifest
+    # Generate Node 02 using the Gemini Cognitive Narrative Director
+    manifest_dict = director.generate_node_2(p, state.log, seed=req.seed)
+    state.last_manifest = manifest_dict
 
     # Persist session and final Map 2 manifest to disk for AI training & analytics
     try:
@@ -200,7 +203,7 @@ def solve_mission(req: SolveRequest):
         record = {
             "timestamp": datetime.utcnow().isoformat(),
             "profile": asdict(p),
-            "manifest": manifest.to_dict()
+            "manifest": manifest_dict
         }
         with open(sessions_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
@@ -208,7 +211,7 @@ def solve_mission(req: SolveRequest):
     except Exception as e:
         print(f"[DATA ERROR] Failed to save session to disk: {e}")
 
-    return manifest.to_dict()
+    return manifest_dict
 
 
 @app.get("/api/export/sessions")
@@ -231,12 +234,17 @@ def export_all_sessions():
 def export_training_data():
     """
     Export a (profile_inputs → manifest_outputs) pair.
-    Future: feed these into an ML model to replace the rule-based solver.
     """
     p = state.refresh()
     if state.last_manifest is None:
         return {"error": "No manifest generated yet. Call /api/mission/solve first."}
     m = state.last_manifest
+    target = m.get("target", {}) if isinstance(m, dict) else asdict(m.target)
+    guards = m.get("guards", {}) if isinstance(m, dict) else asdict(m.guards)
+    env = m.get("environment", {}) if isinstance(m, dict) else asdict(m.environment)
+    routes = m.get("routes", {}) if isinstance(m, dict) else asdict(m.routes)
+    archetype = m.get("player_archetype", p.archetype()) if isinstance(m, dict) else m.player_archetype
+
     return {
         "training_sample": {
             "inputs": {
@@ -248,18 +256,18 @@ def export_training_data():
                 "shortcut_ratio": p.shortcut_ratio,
             },
             "outputs": {
-                "archetype": m.player_archetype,
-                "target_armor": m.target.armor,
-                "target_health": m.target.health,
-                "target_location": m.target.location_id,
-                "target_indoors": m.target.is_indoors,
-                "guard_count": m.guards.count,
-                "guard_vision_range": m.guards.vision_range,
-                "guard_reaction_speed": m.guards.reaction_speed,
-                "env_visibility": m.environment.visibility,
-                "env_time_of_day": m.environment.time_of_day,
-                "primary_route": m.routes.primary_route_id,
-                "blocked_routes": m.routes.blocked_routes,
+                "archetype": archetype,
+                "target_armor": target.get("armor"),
+                "target_health": target.get("health"),
+                "target_location": target.get("location_id"),
+                "target_indoors": target.get("is_indoors"),
+                "guard_count": guards.get("count"),
+                "guard_vision_range": guards.get("vision_range"),
+                "guard_reaction_speed": guards.get("reaction_speed"),
+                "env_visibility": env.get("visibility"),
+                "env_time_of_day": env.get("time_of_day"),
+                "primary_route": routes.get("primary_route") or routes.get("primary_route_id"),
+                "blocked_routes": routes.get("blocked_routes"),
             }
         }
     }
