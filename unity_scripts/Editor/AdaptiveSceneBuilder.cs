@@ -46,6 +46,26 @@ public static class AdaptiveSceneBuilder
     private const int LAYER_ALLEY        = 9;
     private const int LAYER_BUILDING     = 10;
 
+    private static void SafeSetTag(GameObject go, string tag)
+    {
+        try
+        {
+            go.tag = tag;
+        }
+        catch
+        {
+            if (tag == "Explosive")
+            {
+                try { go.tag = "Explosion"; return; } catch { }
+            }
+            if (tag == "NPC")
+            {
+                try { go.tag = "Civilian"; return; } catch { }
+            }
+            Debug.LogWarning($"[SceneBuilder] Tag '{tag}' is not defined in Unity Project Settings. Object '{go.name}' left untagged.");
+        }
+    }
+
     private static Sprite GetWhiteSprite()
         => AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
 
@@ -75,8 +95,8 @@ public static class AdaptiveSceneBuilder
     {
         Debug.Log("[SceneBuilder] === BUILDING MAP 1 — FULL PHASE 2 CITY ===");
 
-        if (Camera.main != null)
-            Camera.main.backgroundColor = new Color(0.10f, 0.11f, 0.13f);
+        // Automatically clear any leftover old objects from previous builds
+        ClearAllExceptCamera();
 
         // ── Ground surface first ──────────────────────────────────
         BuildMap1_Roads();
@@ -88,6 +108,9 @@ public static class AdaptiveSceneBuilder
 
         // ── Player ────────────────────────────────────────────────
         GameObject player = BuildPlayer(new Vector3(-25f, 0f, 0f));
+
+        // ── Camera: Position at Spawn & Attach Smooth Follow ──────
+        SetupCamera(player, new Vector3(-25f, 0f, -10f));
 
         // ── Vehicles ─────────────────────────────────────────────
         BuildMap1_Vehicles();
@@ -120,6 +143,41 @@ public static class AdaptiveSceneBuilder
             "  SOUTH  — Dark alleys, 2 gang thugs, wire fences, shadows\n\n" +
             "Total entities: 41\n\n" +
             "Save the scene now (Ctrl+S).", "Got it!");
+    }
+
+    private static void ClearAllExceptCamera()
+    {
+        var roots = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
+        for (int i = roots.Length - 1; i >= 0; i--)
+        {
+            var r = roots[i];
+            if (r == null) continue;
+            if (r.GetComponent<Camera>() != null || r.name == "Main Camera") continue;
+            if (r.GetComponent<UnityEngine.Rendering.Universal.Light2D>() != null) continue;
+            Object.DestroyImmediate(r);
+        }
+    }
+
+    private static void SetupCamera(GameObject player, Vector3 initialPos)
+    {
+        Camera cam = Camera.main;
+        if (cam == null)
+        {
+            GameObject camGO = new GameObject("Main Camera");
+            cam = camGO.AddComponent<Camera>();
+            camGO.tag = "MainCamera";
+            camGO.AddComponent<AudioListener>();
+        }
+
+        cam.orthographic = true;
+        cam.orthographicSize = 6.5f;
+        cam.backgroundColor = new Color(0.10f, 0.11f, 0.13f);
+        cam.transform.position = initialPos;
+
+        CameraFollow2D follow = cam.gameObject.GetOrAddComponent<CameraFollow2D>();
+        if (player != null) follow.target = player.transform;
+        follow.smoothSpeed = 10f;
+        follow.cameraZ = -10f;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -221,7 +279,7 @@ public static class AdaptiveSceneBuilder
         GameObject b = new GameObject(name);
         b.transform.position = pos;
         b.layer = LAYER_BUILDING;
-        b.tag   = "Building";
+        SafeSetTag(b, "Building");
 
         SpriteRenderer sr = b.AddComponent<SpriteRenderer>();
         sr.sprite    = GetWhiteSprite(); // solid block; in Unity assign wall tiles
@@ -275,7 +333,7 @@ public static class AdaptiveSceneBuilder
         GameObject car = new GameObject(name);
         car.transform.position = pos;
         car.layer = LAYER_INTERACTABLE;
-        car.tag   = "Vehicle";
+        SafeSetTag(car, "Vehicle");
 
         Sprite cleanSprite = LoadSprite(spritePath);
         Sprite burntSprite = LoadSprite(burntSpritePath);
@@ -430,7 +488,7 @@ public static class AdaptiveSceneBuilder
         GameObject barrel = new GameObject(name);
         barrel.transform.position = pos;
         barrel.layer = LAYER_INTERACTABLE;
-        barrel.tag   = "Explosive";
+        SafeSetTag(barrel, "Explosive");
 
         SpriteRenderer sr = barrel.AddComponent<SpriteRenderer>();
         sr.sprite = LoadSprite("kenney_vehicles/PNG/Objects/barrel_red.png");
@@ -531,7 +589,7 @@ public static class AdaptiveSceneBuilder
 
         GameObject civ = new GameObject(name);
         civ.transform.position = pos;
-        civ.tag = "Civilian";
+        SafeSetTag(civ, "Civilian");
 
         SpriteRenderer sr = civ.AddComponent<SpriteRenderer>();
         sr.sprite = LoadSprite(spritePath);
@@ -581,7 +639,7 @@ public static class AdaptiveSceneBuilder
 
         GameObject npc = new GameObject("NPC_Informant");
         npc.transform.position = new Vector3(-2f, -7f, 0f);
-        npc.tag = "NPC";
+        SafeSetTag(npc, "NPC");
 
         SpriteRenderer sr = npc.AddComponent<SpriteRenderer>();
         sr.sprite = LoadSprite("kenney_topdown_shooter/PNG/Man Old/manOld_stand.png");
@@ -607,7 +665,7 @@ public static class AdaptiveSceneBuilder
         GameObject enemy = new GameObject(name);
         enemy.transform.position = spawnPos;
         enemy.layer = LAYER_ENEMY;
-        enemy.tag   = "Enemy";
+        SafeSetTag(enemy, "Enemy");
 
         SpriteRenderer sr = enemy.AddComponent<SpriteRenderer>();
         sr.sprite = LoadSprite(spritePath);
@@ -697,7 +755,7 @@ public static class AdaptiveSceneBuilder
         GameObject brief = new GameObject("CashBriefcase");
         brief.transform.position = pos;
         brief.layer = LAYER_INTERACTABLE;
-        brief.tag   = "Interactable";
+        SafeSetTag(brief, "Interactable");
 
         SpriteRenderer sr = brief.AddComponent<SpriteRenderer>();
         sr.sprite = LoadSprite("kenney_vehicles/PNG/Objects/barrel_blue_down.png");
@@ -762,11 +820,12 @@ public static class AdaptiveSceneBuilder
     {
         Debug.Log("[SceneBuilder] === BUILDING MAP 2 ===");
 
-        if (Camera.main != null)
-            Camera.main.backgroundColor = new Color(0.12f, 0.13f, 0.15f);
+        ClearAllExceptCamera();
 
         BuildCityEnvironment_Legacy();
         GameObject player      = BuildPlayer(new Vector3(-22f, -12f, 0f));
+        SetupCamera(player, new Vector3(-22f, -12f, -10f));
+
         PlayerCombat combat = player.GetComponent<PlayerCombat>();
         if (combat != null)
         {
@@ -836,7 +895,7 @@ public static class AdaptiveSceneBuilder
 
         GameObject player = new GameObject("Player");
         player.transform.position = position;
-        player.tag = "Player";
+        SafeSetTag(player, "Player");
 
         SpriteRenderer sr = player.AddComponent<SpriteRenderer>();
         sr.sprite = LoadSprite("kenney_topdown_shooter/PNG/Hitman 1/hitman1_stand.png");
@@ -1054,7 +1113,7 @@ public static class AdaptiveSceneBuilder
         CircleCollider2D col = go.AddComponent<CircleCollider2D>();
         col.radius = 0.35f;
         go.layer   = LAYER_ENEMY;
-        go.tag     = "Enemy";
+        SafeSetTag(go, "Enemy");
 
         for (int w = 0; w < 2; w++)
         {
