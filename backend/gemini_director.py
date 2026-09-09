@@ -19,13 +19,18 @@ Responsibilities:
 
 import os
 import json
+import random
 import logging
 from typing import Optional, Any, Dict, List
 from dataclasses import asdict
 
 from .telemetry import TelemetryLog, SurfaceType, MovementType, CombatStyle, DestructionType
 from .profiler import PlayerProfile
-from .target_solver import M2Manifest, TargetConfig, GuardConfig, EnvironmentConfig, RouteConfig
+from .target_solver import (
+    M2Manifest, TargetConfig, GuardConfig, EnvironmentConfig, RouteConfig,
+    RoomGraphManifest, build_room_graph,
+    SECTOR_GRID_COORDS, SECTOR_ADJACENCY, SECTOR_MODULES, CONNECTION_STATUSES,
+)
 
 logger = logging.getLogger("gemini_director")
 logging.basicConfig(level=logging.INFO)
@@ -90,12 +95,25 @@ class GeminiNarrativeDirector:
     Cognitive AI Director powered by Google Gemini API.
     """
 
-    def __init__(self, ground_truth_file: Optional[str] = None):
+    def __init__(self, ground_truth_file: Optional[str] = None, ground_truth_file_map2: Optional[str] = None):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
         if ground_truth_file is None:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
             ground_truth_file = os.path.join(base_dir, "data", "map1_ground_truth.json")
+        if ground_truth_file_map2 is None:
+            ground_truth_file_map2 = os.path.join(base_dir, "data", "map2_ground_truth.json")
 
         self.ground_truth = self._load_ground_truth(ground_truth_file)
+        self.ground_truth_map2 = self._load_ground_truth(
+            ground_truth_file_map2,
+            default={
+                "map_name": "Node 02 Sector Grid",
+                "dimensions": {"width": 60, "height": 45},
+                "sector_grid_coords": SECTOR_GRID_COORDS,
+                "sector_adjacency": SECTOR_ADJACENCY,
+                "modules": list(SECTOR_MODULES),
+                "connection_statuses": list(CONNECTION_STATUSES),
+            },
+        )
         self.api_key = self._load_api_key()
 
     def _load_api_key(self) -> str:
@@ -138,14 +156,14 @@ class GeminiNarrativeDirector:
 
         return ""
 
-    def _load_ground_truth(self, path: str) -> Dict[str, Any]:
+    def _load_ground_truth(self, path: str, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     return json.load(f)
             except Exception as e:
                 logger.error(f"[Director] Error loading ground truth: {e}")
-        return {"map_name": "Pauper Streets", "dimensions": {"width": 60, "height": 40}}
+        return default or {"map_name": "Pauper Streets", "dimensions": {"width": 60, "height": 40}}
 
     def generate_node_2(self, profile: PlayerProfile, telemetry: TelemetryLog, seed: Optional[int] = None) -> Dict[str, Any]:
         """
@@ -225,6 +243,13 @@ class GeminiNarrativeDirector:
             "key_locations": self.ground_truth.get("key_locations", {}),
             "choke_points": self.ground_truth.get("choke_points", [])
         }
+        map2_layout = {
+            "canvas": self.ground_truth_map2.get("dimensions", {"width": 60, "height": 45}),
+            "sector_grid_coords": self.ground_truth_map2.get("sector_grid_coords", SECTOR_GRID_COORDS),
+            "sector_adjacency": self.ground_truth_map2.get("sector_adjacency", SECTOR_ADJACENCY),
+            "modules": self.ground_truth_map2.get("modules", list(SECTOR_MODULES)),
+            "connection_statuses": self.ground_truth_map2.get("connection_statuses", list(CONNECTION_STATUSES)),
+        }
 
         system_instruction = f"""
 You are the Cognitive Narrative Director of the game 'AdaptiveWorld2D'.
@@ -251,6 +276,22 @@ Your Job:
    - Guards count: 3 to 10. Vision: 4.0 to 12.0. Reaction: 0.8 to 2.5.
    - Routes: primary_route ('main_road', 'alley_south', 'highway_east'), blocked_routes (subset of ['main_road_north', 'alley_south', 'highway_east', 'warehouse_front_entrance']), cars_available (boolean).
    - Environment: time_of_day ('day', 'dusk', 'night'), weather ('clear', 'fog', 'rain'), visibility (0.3 to 1.0), ambient_light (0.2 to 1.0).
+6. Additionally, output a `room_graph`: a full 9-sector tactical blueprint of Map 2, laid out on the
+   3x3 grid supplied to you in MAP 2 SPATIAL GRID below.
+   - `sectors` MUST be a JSON ARRAY (not an object) with EXACTLY 9 entries, one per sector id
+     (NW, NC, NE, MW, MC, ME, SW, SC, SE), each with its exact `center_x`/`center_y` from the grid.
+   - Each sector's `module` must be one of the provided `modules`, chosen to match the archetype's
+     narrative (e.g. GHOST favors SLUM_ALLEYWAYS/WAREHOUSE_INTERIOR; WRECKING_BALL favors
+     INDUSTRIAL_DEPOT/FORTIFIED_PLAZA; SPEEDRUNNER favors URBAN_HIGHWAY/WATERFRONT_DOCKS;
+     AGGRESSOR favors URBAN_HIGHWAY/SECURITY_COMPOUND). Use OPEN_STREET/VACANT_LOT as filler
+     for thematically-unassigned sectors.
+   - `connections` MUST contain EXACTLY the 12 adjacency pairs listed in `sector_adjacency` below,
+     each assigned one of the provided `connection_statuses`.
+   - `target_sector`, `player_spawn_sector`, and `extraction_sector` must each be a distinct sector id.
+   - CRITICAL INVARIANT: a path using only 'open' or 'barricaded_*' edges (never 'walled_off') MUST
+     exist from `player_spawn_sector` to `target_sector`, and from `target_sector` to
+     `extraction_sector`. Use 'barricaded_*' statuses for chokepoints on the intended path, and
+     reserve 'walled_off' only for edges meant to force the player around.
 
 Return strictly valid JSON conforming to the requested schema.
 """
@@ -258,6 +299,9 @@ Return strictly valid JSON conforming to the requested schema.
         prompt = f"""
 MAP 1 GROUND TRUTH:
 {json.dumps(gt_summary, indent=2)}
+
+MAP 2 SPATIAL GRID (destination -- you must populate this exact 3x3 sector grid):
+{json.dumps(map2_layout, indent=2)}
 
 PLAYER RUN TELEMETRY DIGEST:
 {json.dumps(digest, indent=2)}
@@ -306,6 +350,28 @@ Generate the complete Director response in the following JSON format:
     "reinforced_barricades": [],
     "cars_available": <bool>
   }},
+  "room_graph": {{
+    "sectors": [
+      {{
+        "id": "<NW|NC|NE|MW|MC|ME|SW|SC|SE>",
+        "module": "<one of the 9 modules from MAP 2 SPATIAL GRID>",
+        "center_x": <float, must exactly match sector_grid_coords for this id>,
+        "center_y": <float, must exactly match sector_grid_coords for this id>,
+        "guards": [
+          {{ "sector_id": "<same id>", "offset_x": <float -3 to 3>, "offset_y": <float -3 to 3>, "role": "<patrol|sentry|bodyguard>", "armored": <bool> }}
+        ],
+        "props": ["<fuel_barrel|crate|car>"]
+      }}
+      // ... exactly 9 entries total, one per sector id, all ids unique and covering the full grid
+    ],
+    "connections": [
+      {{ "from_sector": "<id>", "to_sector": "<adjacent id>", "status": "<one of connection_statuses>" }}
+      // ... exactly the 12 pairs listed in sector_adjacency above, no more, no fewer
+    ],
+    "target_sector": "<sector id where Viktor is located -- should thematically match target.location_id>",
+    "player_spawn_sector": "<sector id, distinct from target_sector>",
+    "extraction_sector": "<sector id, distinct from player_spawn_sector>"
+  }},
   "reasoning": [
     "<reason 1>",
     "<reason 2>"
@@ -326,10 +392,36 @@ Generate the complete Director response in the following JSON format:
         if response and response.text:
             cleaned_text = response.text.strip()
             manifest_json = json.loads(cleaned_text)
+            archetype = manifest_json.get("player_archetype", profile.archetype())
+            self._validate_and_repair_room_graph(manifest_json, archetype, seed)
             logger.info(f"[Director] Successfully generated Node 02 via Gemini: Archetype={manifest_json.get('player_archetype')}")
             return manifest_json
 
         return None
+
+    def _validate_and_repair_room_graph(self, manifest_json: Dict[str, Any], archetype: str, seed: Optional[int]) -> None:
+        """Mutates manifest_json in place: ensures a structurally valid `room_graph` is present.
+        Gemini output is not guaranteed to be schema-perfect (wrong sector count, broken
+        connectivity, hallucinated ids). If validation fails, the entire room_graph is replaced
+        with the deterministic handcrafted template for `archetype` so Unity never receives a
+        malformed graph."""
+        rg = manifest_json.get("room_graph")
+        if rg is None:
+            errors: List[str] = ["room_graph missing from Gemini response"]
+        else:
+            probe = RoomGraphManifest(
+                sectors=rg.get("sectors", []),
+                connections=rg.get("connections", []),
+                target_sector=rg.get("target_sector", ""),
+                player_spawn_sector=rg.get("player_spawn_sector", ""),
+                extraction_sector=rg.get("extraction_sector", ""),
+            )
+            errors = probe.validate()
+
+        if errors:
+            logger.warning(f"[Director] Gemini room_graph invalid ({errors}); repairing with deterministic template.")
+            rng = random.Random(seed)
+            manifest_json["room_graph"] = build_room_graph(archetype, rng).to_dict()
 
     def _generate_fallback(self, profile: PlayerProfile, telemetry: TelemetryLog, seed: Optional[int] = None) -> Dict[str, Any]:
         """
@@ -337,6 +429,8 @@ Generate the complete Director response in the following JSON format:
         """
         archetype = profile.archetype()
         digest = self._build_telemetry_digest(profile, telemetry)
+        rng = random.Random(seed)
+        room_graph = build_room_graph(archetype, rng).to_dict()
 
         # Base archetype tailoring
         if archetype == "GHOST":
@@ -514,6 +608,7 @@ Generate the complete Director response in the following JSON format:
                 "reinforced_barricades": [],
                 "cars_available": cars_avail
             },
+            "room_graph": room_graph,
             "reasoning": [
                 f"Adapted for archetype '{archetype}' based on Map 1 telemetry.",
                 f"Telemetry: Kills={profile.total_kills}, Destruction={profile.destruction_index:.2f}, StealthRatio={profile.stealth_ratio:.2f}.",

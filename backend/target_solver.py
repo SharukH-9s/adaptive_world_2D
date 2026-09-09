@@ -9,7 +9,7 @@ Future version: replace with a trained ML model using these outputs as labels.
 """
 import random
 from dataclasses import dataclass, field, asdict
-from typing import List
+from typing import List, Optional
 from .profiler import PlayerProfile
 
 
@@ -272,3 +272,358 @@ class M2TargetSolver:
 
         manifest.reasoning = reasons
         return manifest
+
+
+# ---------------------------------------------------------------------------
+# Room / Sector Graph (3x3 tactical grid) -- Map 2 AI-Driven redesign, Phase 1
+# ---------------------------------------------------------------------------
+
+# Canvas: 60 x 45 units. Columns X = -20/0/+20 (W/C/E). Rows Y = +15/0/-15 (N/M/S).
+SECTOR_GRID_COORDS = {
+    "NW": (-20.0, 15.0), "NC": (0.0, 15.0), "NE": (20.0, 15.0),
+    "MW": (-20.0, 0.0), "MC": (0.0, 0.0), "ME": (20.0, 0.0),
+    "SW": (-20.0, -15.0), "SC": (0.0, -15.0), "SE": (20.0, -15.0),
+}
+
+# All 12 unique adjacent pairs (horizontal + vertical neighbors only, no diagonals).
+SECTOR_ADJACENCY = [
+    ("NW", "NC"), ("NC", "NE"),
+    ("MW", "MC"), ("MC", "ME"),
+    ("SW", "SC"), ("SC", "SE"),
+    ("NW", "MW"), ("MW", "SW"),
+    ("NC", "MC"), ("MC", "SC"),
+    ("NE", "ME"), ("ME", "SE"),
+]
+
+SECTOR_MODULES = (
+    "WAREHOUSE_INTERIOR", "FORTIFIED_PLAZA", "SLUM_ALLEYWAYS", "URBAN_HIGHWAY",
+    "INDUSTRIAL_DEPOT", "WATERFRONT_DOCKS", "SECURITY_COMPOUND",
+    "OPEN_STREET", "VACANT_LOT",  # generic filler modules for thematically-unassigned sectors
+)
+
+CONNECTION_STATUSES = ("open", "barricaded_wire_fence", "barricaded_concrete", "walled_off")
+IMPASSABLE_STATUSES = ("walled_off",)  # only status that fully blocks connectivity (others are destructible)
+
+
+@dataclass
+class GuardEntityConfig:
+    """A single guard placement within a sector, offset from the sector center."""
+    sector_id: str = "NW"
+    offset_x: float = 0.0
+    offset_y: float = 0.0
+    role: str = "patrol"          # "patrol", "sentry", "bodyguard"
+    armored: bool = False
+
+
+@dataclass
+class TargetBossConfig:
+    """Reserved for future direct spatial-stat binding of the boss to the room graph.
+    The live pipeline currently keeps boss stats in the top-level `target` object and
+    only references its sector via `RoomGraphManifest.target_sector`."""
+    name: str = "Viktor"
+    sector_id: str = "NW"
+    armor: str = "medium"
+    health: int = 100
+    movement: str = "patrol"
+    is_indoors: bool = True
+
+
+@dataclass
+class SectorConfig:
+    id: str = "NW"                                   # one of the 9 grid ids
+    module: str = "OPEN_STREET"
+    center_x: float = 0.0
+    center_y: float = 0.0
+    guards: List[GuardEntityConfig] = field(default_factory=list)
+    props: List[str] = field(default_factory=list)    # e.g. "fuel_barrel", "crate", "car"
+
+
+@dataclass
+class ConnectionConfig:
+    from_sector: str = "NW"
+    to_sector: str = "NC"
+    status: str = "open"          # one of CONNECTION_STATUSES
+
+
+@dataclass
+class RoomGraphManifest:
+    sectors: List[SectorConfig] = field(default_factory=list)
+    connections: List[ConnectionConfig] = field(default_factory=list)
+    target_sector: str = "NW"
+    player_spawn_sector: str = "SW"
+    extraction_sector: str = "NE"
+
+    def to_dict(self):
+        return asdict(self)
+
+    def validate(self) -> List[str]:
+        """Returns a list of schema/connectivity problems. Empty list = fully valid."""
+        errors: List[str] = []
+
+        ids = {s.id if not isinstance(s, dict) else s["id"] for s in self.sectors}
+        expected_ids = set(SECTOR_GRID_COORDS.keys())
+        if ids != expected_ids:
+            missing = expected_ids - ids
+            extra = ids - expected_ids
+            if missing:
+                errors.append(f"Missing sectors: {sorted(missing)}")
+            if extra:
+                errors.append(f"Unknown sectors: {sorted(extra)}")
+
+        def _c(conn, attr):
+            return conn[attr] if isinstance(conn, dict) else getattr(conn, attr)
+
+        edge_set = {(_c(c, "from_sector"), _c(c, "to_sector")) for c in self.connections}
+        expected_edges = set(SECTOR_ADJACENCY)
+        if edge_set != expected_edges:
+            missing_edges = expected_edges - edge_set
+            extra_edges = edge_set - expected_edges
+            if missing_edges:
+                errors.append(f"Missing connections: {sorted(missing_edges)}")
+            if extra_edges:
+                errors.append(f"Non-adjacent/unknown connections: {sorted(extra_edges)}")
+
+        for c in self.connections:
+            status = _c(c, "status")
+            if status not in CONNECTION_STATUSES:
+                errors.append(f"Invalid connection status '{status}' on {_c(c, 'from_sector')}->{_c(c, 'to_sector')}")
+
+        for key in ("target_sector", "player_spawn_sector", "extraction_sector"):
+            val = getattr(self, key)
+            if val not in SECTOR_GRID_COORDS:
+                errors.append(f"{key}='{val}' is not a valid sector id")
+
+        if not errors:
+            if not self._is_reachable(self.player_spawn_sector, self.target_sector):
+                errors.append(
+                    f"Target sector '{self.target_sector}' unreachable from spawn "
+                    f"'{self.player_spawn_sector}' (blocked by walled_off edges)"
+                )
+            if not self._is_reachable(self.target_sector, self.extraction_sector):
+                errors.append(
+                    f"Extraction sector '{self.extraction_sector}' unreachable from target "
+                    f"'{self.target_sector}' (blocked by walled_off edges)"
+                )
+
+        return errors
+
+    def _is_reachable(self, start: str, goal: str) -> bool:
+        """BFS over the sector graph. Only 'walled_off' edges are treated as impassable
+        (barricades are destructible, so they still count as traversable)."""
+        if start == goal:
+            return True
+
+        def _c(conn, attr):
+            return conn[attr] if isinstance(conn, dict) else getattr(conn, attr)
+
+        traversable: dict = {}
+        for c in self.connections:
+            if _c(c, "status") in IMPASSABLE_STATUSES:
+                continue
+            a, b = _c(c, "from_sector"), _c(c, "to_sector")
+            traversable.setdefault(a, set()).add(b)
+            traversable.setdefault(b, set()).add(a)
+
+        visited = {start}
+        frontier = [start]
+        while frontier:
+            nxt = []
+            for node in frontier:
+                for neighbor in traversable.get(node, ()):
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        nxt.append(neighbor)
+            frontier = nxt
+        return goal in visited
+
+
+def _sector(id_: str, module: str, guards=None, props=None) -> "SectorConfig":
+    x, y = SECTOR_GRID_COORDS[id_]
+    return SectorConfig(id=id_, module=module, center_x=x, center_y=y,
+                         guards=guards or [], props=props or [])
+
+
+def _edges(status_map: dict) -> List["ConnectionConfig"]:
+    """status_map: {(from,to): status}. Any adjacency omitted from the map defaults to 'open'."""
+    out = []
+    for (a, b) in SECTOR_ADJACENCY:
+        status = status_map.get((a, b), status_map.get((b, a), "open"))
+        out.append(ConnectionConfig(from_sector=a, to_sector=b, status=status))
+    return out
+
+
+def build_room_graph(archetype: str, rng: Optional[random.Random] = None) -> RoomGraphManifest:
+    """
+    Handcrafted 9-sector blueprint templates, one per archetype.
+
+    Each template guarantees (verified by RoomGraphManifest.validate()):
+      - All 9 sectors present with a module + coordinates.
+      - All 12 adjacency edges present with a valid status.
+      - A non-'walled_off' path exists spawn -> target -> extraction.
+    """
+    rng = rng or random.Random()
+
+    if archetype == "GHOST":
+        # Slum Alleys -> Warehouse Interior: tight corridors, fog, wire fences.
+        sectors = [
+            _sector("SW", "SLUM_ALLEYWAYS", guards=[GuardEntityConfig("SW", -1, 0, "patrol")]),
+            _sector("SC", "SLUM_ALLEYWAYS", guards=[GuardEntityConfig("SC", 0, 0, "sentry")]),
+            _sector("SE", "VACANT_LOT"),
+            _sector("MW", "SLUM_ALLEYWAYS", guards=[GuardEntityConfig("MW", 1, 0, "patrol")]),
+            _sector("MC", "OPEN_STREET"),
+            _sector("ME", "URBAN_HIGHWAY", guards=[GuardEntityConfig("ME", 0, 1, "patrol")]),
+            _sector("NW", "WAREHOUSE_INTERIOR", props=["crate", "crate"],
+                    guards=[GuardEntityConfig("NW", -2, 0, "bodyguard", armored=True),
+                            GuardEntityConfig("NW", 2, 0, "bodyguard", armored=True)]),
+            _sector("NC", "FORTIFIED_PLAZA", guards=[GuardEntityConfig("NC", 0, 0, "sentry")]),
+            _sector("NE", "WATERFRONT_DOCKS"),
+        ]
+        connections = _edges({
+            ("NW", "NC"): "open",
+            ("NC", "NE"): "barricaded_wire_fence",
+            ("MW", "MC"): "barricaded_wire_fence",
+            ("MC", "ME"): "walled_off",
+            ("SW", "SC"): "open",
+            ("SC", "SE"): "barricaded_concrete",
+            ("NW", "MW"): "barricaded_wire_fence",
+            ("MW", "SW"): "open",
+            ("NC", "MC"): "barricaded_wire_fence",
+            ("MC", "SC"): "walled_off",
+            ("NE", "ME"): "barricaded_wire_fence",
+            ("ME", "SE"): "open",
+        })
+        target_sector, spawn_sector, extraction_sector = "NW", "SW", "NE"
+
+    elif archetype == "WRECKING_BALL":
+        # Industrial Depot -> Fortified Plaza: explosive barrels, concrete roadblocks, ramming vehicles.
+        sectors = [
+            _sector("SW", "INDUSTRIAL_DEPOT", props=["fuel_barrel", "fuel_barrel"]),
+            _sector("SC", "INDUSTRIAL_DEPOT", props=["fuel_barrel"]),
+            _sector("SE", "VACANT_LOT"),
+            _sector("MW", "URBAN_HIGHWAY", props=["car"]),
+            _sector("MC", "FORTIFIED_PLAZA",
+                    guards=[GuardEntityConfig("MC", -2, 0, "bodyguard", armored=True),
+                            GuardEntityConfig("MC", 2, 0, "bodyguard", armored=True)]),
+            _sector("ME", "URBAN_HIGHWAY", props=["car"]),
+            _sector("NW", "WAREHOUSE_INTERIOR"),
+            _sector("NC", "OPEN_STREET"),
+            _sector("NE", "WATERFRONT_DOCKS"),
+        ]
+        connections = _edges({
+            ("NW", "NC"): "walled_off",
+            ("NC", "NE"): "barricaded_concrete",
+            ("MW", "MC"): "barricaded_concrete",
+            ("MC", "ME"): "barricaded_concrete",
+            ("SW", "SC"): "open",
+            ("SC", "SE"): "walled_off",
+            ("NW", "MW"): "barricaded_concrete",
+            ("MW", "SW"): "open",
+            ("NC", "MC"): "barricaded_concrete",
+            ("MC", "SC"): "walled_off",
+            ("NE", "ME"): "barricaded_concrete",
+            ("ME", "SE"): "walled_off",
+        })
+        target_sector, spawn_sector, extraction_sector = "MC", "SW", "NE"
+
+    elif archetype == "SPEEDRUNNER":
+        # Urban Highway -> Waterfront Docks: direct road, roadblock chokepoints.
+        sectors = [
+            _sector("SW", "URBAN_HIGHWAY", props=["car"]),
+            _sector("SC", "URBAN_HIGHWAY"),
+            _sector("SE", "WATERFRONT_DOCKS"),
+            _sector("MW", "OPEN_STREET"),
+            _sector("MC", "URBAN_HIGHWAY", props=["car"]),
+            _sector("ME", "URBAN_HIGHWAY"),
+            _sector("NW", "VACANT_LOT"),
+            _sector("NC", "FORTIFIED_PLAZA"),
+            _sector("NE", "WATERFRONT_DOCKS",
+                    guards=[GuardEntityConfig("NE", 0, 1, "sentry"),
+                            GuardEntityConfig("NE", 0, -1, "patrol")]),
+        ]
+        connections = _edges({
+            ("NW", "NC"): "walled_off",
+            ("NC", "NE"): "barricaded_concrete",
+            ("MW", "MC"): "open",
+            ("MC", "ME"): "open",
+            ("SW", "SC"): "open",
+            ("SC", "SE"): "barricaded_concrete",
+            ("NW", "MW"): "walled_off",
+            ("MW", "SW"): "open",
+            ("NC", "MC"): "barricaded_concrete",
+            ("MC", "SC"): "walled_off",
+            ("NE", "ME"): "barricaded_concrete",
+            ("ME", "SE"): "open",
+        })
+        target_sector, spawn_sector, extraction_sector = "NE", "SW", "SE"
+
+    elif archetype == "AGGRESSOR":
+        # Urban Highway -> Security Compound: heavy SWAT guards, bunker crossfire.
+        sectors = [
+            _sector("MW", "URBAN_HIGHWAY"),
+            _sector("SW", "VACANT_LOT"),
+            _sector("SC", "OPEN_STREET"),
+            _sector("NE", "WATERFRONT_DOCKS"),
+            _sector("MC", "URBAN_HIGHWAY", props=["car"]),
+            _sector("ME", "FORTIFIED_PLAZA",
+                    guards=[GuardEntityConfig("ME", -1, 1, "sentry", armored=True),
+                            GuardEntityConfig("ME", 1, -1, "sentry", armored=True)]),
+            _sector("NW", "WAREHOUSE_INTERIOR"),
+            _sector("NC", "INDUSTRIAL_DEPOT", props=["fuel_barrel"]),
+            _sector("SE", "SECURITY_COMPOUND",
+                    guards=[GuardEntityConfig("SE", -2, 0, "bodyguard", armored=True),
+                            GuardEntityConfig("SE", 2, 0, "bodyguard", armored=True),
+                            GuardEntityConfig("SE", 0, 2, "sentry", armored=True)]),
+        ]
+        connections = _edges({
+            ("NW", "NC"): "barricaded_concrete",
+            ("NC", "NE"): "walled_off",
+            ("MW", "MC"): "open",
+            ("MC", "ME"): "barricaded_concrete",
+            ("SW", "SC"): "open",
+            ("SC", "SE"): "barricaded_concrete",
+            ("NW", "MW"): "barricaded_concrete",
+            ("MW", "SW"): "walled_off",
+            ("NC", "MC"): "barricaded_concrete",
+            ("MC", "SC"): "walled_off",
+            ("NE", "ME"): "barricaded_concrete",
+            ("ME", "SE"): "barricaded_concrete",
+        })
+        target_sector, spawn_sector, extraction_sector = "SE", "MW", "NE"
+
+    else:  # BALANCED (and TACTICIAN, if ever reintroduced)
+        sectors = [
+            _sector("SW", "SLUM_ALLEYWAYS", guards=[GuardEntityConfig("SW", 0, 0, "patrol")]),
+            _sector("SC", "OPEN_STREET"),
+            _sector("SE", "VACANT_LOT"),
+            _sector("MW", "URBAN_HIGHWAY", props=["car"]),
+            _sector("MC", "INDUSTRIAL_DEPOT", props=["fuel_barrel"]),
+            _sector("ME", "OPEN_STREET"),
+            _sector("NW", "WAREHOUSE_INTERIOR"),
+            _sector("NC", "FORTIFIED_PLAZA",
+                    guards=[GuardEntityConfig("NC", -1, 0, "bodyguard"),
+                            GuardEntityConfig("NC", 1, 0, "bodyguard")]),
+            _sector("NE", "WATERFRONT_DOCKS"),
+        ]
+        connections = _edges({
+            ("NW", "NC"): "open",
+            ("NC", "NE"): "barricaded_wire_fence",
+            ("MW", "MC"): "open",
+            ("MC", "ME"): "barricaded_wire_fence",
+            ("SW", "SC"): "barricaded_wire_fence",
+            ("SC", "SE"): "walled_off",
+            ("NW", "MW"): "barricaded_concrete",
+            ("MW", "SW"): "open",
+            ("NC", "MC"): "open",
+            ("MC", "SC"): "walled_off",
+            ("NE", "ME"): "barricaded_wire_fence",
+            ("ME", "SE"): "open",
+        })
+        target_sector, spawn_sector, extraction_sector = "NC", "SW", "NE"
+
+    return RoomGraphManifest(
+        sectors=sectors,
+        connections=connections,
+        target_sector=target_sector,
+        player_spawn_sector=spawn_sector,
+        extraction_sector=extraction_sector,
+    )

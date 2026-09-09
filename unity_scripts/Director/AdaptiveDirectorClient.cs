@@ -54,6 +54,86 @@ namespace AdaptiveWorld2D.Director
         public bool cars_available;
     }
 
+    /// <summary>A single guard placement within a sector, offset from the sector center.
+    /// Mirrors backend/target_solver.py's GuardEntityConfig exactly (field-for-field).</summary>
+    [Serializable]
+    public class GuardEntityConfig
+    {
+        public string sector_id;
+        public float offset_x;
+        public float offset_y;
+        public string role;     // "patrol", "sentry", "bodyguard"
+        public bool armored;
+    }
+
+    /// <summary>Reserved for future direct spatial-stat binding of the boss to the room graph.
+    /// Mirrors backend/target_solver.py's TargetBossConfig. NOT currently populated in the live
+    /// JSON payload -- boss stats remain in TargetManifest, referenced spatially only via
+    /// RoomGraphManifest.target_sector.</summary>
+    [Serializable]
+    public class TargetBossConfig
+    {
+        public string name;
+        public string sector_id;
+        public string armor;
+        public int health;
+        public string movement;
+        public bool is_indoors;
+    }
+
+    /// <summary>One cell of the 3x3 tactical sector grid (60x45 canvas, cells at
+    /// X = -20/0/+20, Y = +15/0/-15). Mirrors backend/target_solver.py's SectorConfig.</summary>
+    [Serializable]
+    public class SectorConfig
+    {
+        public string id;       // "NW", "NC", "NE", "MW", "MC", "ME", "SW", "SC", "SE"
+        public string module;   // "WAREHOUSE_INTERIOR", "FORTIFIED_PLAZA", "SLUM_ALLEYWAYS",
+                                 // "URBAN_HIGHWAY", "INDUSTRIAL_DEPOT", "WATERFRONT_DOCKS",
+                                 // "SECURITY_COMPOUND", "OPEN_STREET", "VACANT_LOT"
+        public float center_x;
+        public float center_y;
+        public List<GuardEntityConfig> guards = new List<GuardEntityConfig>();
+        public List<string> props = new List<string>();
+    }
+
+    /// <summary>A single edge between two adjacent sectors. Mirrors backend/target_solver.py's
+    /// ConnectionConfig.</summary>
+    [Serializable]
+    public class ConnectionConfig
+    {
+        public string from_sector;
+        public string to_sector;
+        public string status;   // "open", "barricaded_wire_fence", "barricaded_concrete", "walled_off"
+    }
+
+    /// <summary>
+    /// The full 9-sector tactical blueprint for Map 2.
+    /// IMPORTANT: `sectors` and `connections` are JSON ARRAYS (List&lt;T&gt;), never dictionaries --
+    /// Unity's JsonUtility cannot deserialize Dictionary&lt;string, T&gt;, so the backend always
+    /// emits sector/connection data as lists with an explicit `id` / `from_sector`+`to_sector` key
+    /// on each entry instead of using the sector id as a JSON object key.
+    /// </summary>
+    [Serializable]
+    public class RoomGraphManifest
+    {
+        public List<SectorConfig> sectors = new List<SectorConfig>();
+        public List<ConnectionConfig> connections = new List<ConnectionConfig>();
+        public string target_sector;
+        public string player_spawn_sector;
+        public string extraction_sector;
+
+        /// <summary>Linear lookup by sector id (only 9 entries -- no need for a dictionary).</summary>
+        public SectorConfig GetSector(string sectorId)
+        {
+            if (sectors == null) return null;
+            for (int i = 0; i < sectors.Count; i++)
+            {
+                if (sectors[i] != null && sectors[i].id == sectorId) return sectors[i];
+            }
+            return null;
+        }
+    }
+
     [Serializable]
     public class MissionManifest
     {
@@ -67,6 +147,7 @@ namespace AdaptiveWorld2D.Director
         public GuardsManifest guards;
         public EnvironmentManifest environment;
         public RoutesManifest routes;
+        public RoomGraphManifest room_graph;
     }
 
     [Serializable]
@@ -203,12 +284,50 @@ namespace AdaptiveWorld2D.Director
                     currentArchetype = manifest.player_archetype;
 
                     Debug.Log($"[AdaptiveDirector] Received M2 Manifest! Target at {manifest.target.location_label}, Armor: {manifest.target.armor}");
+                    LogRoomGraph(manifest.room_graph);
                     OnManifestReceived?.Invoke(manifest);
                     callback?.Invoke(manifest);
                 }
                 else
                 {
                     Debug.LogError($"[AdaptiveDirector] Failed to solve mission: {req.error}");
+                }
+            }
+        }
+
+        /// <summary>Logs the deserialized room_graph in full -- sectors, target/spawn/extraction
+        /// sectors, and every connection status -- so Phase 2 verification can confirm zero data
+        /// loss straight from the Unity console.</summary>
+        private static void LogRoomGraph(RoomGraphManifest rg)
+        {
+            if (rg == null || rg.sectors == null || rg.sectors.Count == 0)
+            {
+                Debug.LogWarning("[AdaptiveDirector] Manifest has no room_graph (older backend response or missing data) -- " +
+                                  "Map 2 sector builder will need to fall back to flat target/location data.");
+                return;
+            }
+
+            int connCount = rg.connections != null ? rg.connections.Count : 0;
+            Debug.Log($"[AdaptiveDirector] RoomGraph received: {rg.sectors.Count}/9 sectors, {connCount}/12 connections | " +
+                      $"spawn={rg.player_spawn_sector} -> target={rg.target_sector} -> extraction={rg.extraction_sector}");
+
+            if (rg.sectors.Count != 9)
+                Debug.LogWarning($"[AdaptiveDirector] room_graph has {rg.sectors.Count} sectors, expected 9 -- possible deserialization data loss!");
+            if (connCount != 12)
+                Debug.LogWarning($"[AdaptiveDirector] room_graph has {connCount} connections, expected 12 -- possible deserialization data loss!");
+
+            foreach (var s in rg.sectors)
+            {
+                int guardCount = s.guards != null ? s.guards.Count : 0;
+                string propsStr = s.props != null ? string.Join(",", s.props) : "";
+                Debug.Log($"[AdaptiveDirector]   Sector {s.id}: module={s.module} center=({s.center_x}, {s.center_y}) guards={guardCount} props=[{propsStr}]");
+            }
+
+            if (rg.connections != null)
+            {
+                foreach (var c in rg.connections)
+                {
+                    Debug.Log($"[AdaptiveDirector]   Connection {c.from_sector} <-> {c.to_sector}: {c.status}");
                 }
             }
         }

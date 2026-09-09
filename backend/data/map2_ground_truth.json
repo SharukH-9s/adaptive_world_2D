@@ -1,0 +1,59 @@
+{
+  "map_id": "NODE_02_FIRST_BLOOD",
+  "map_name": "Node 02 -- Sector Grid (Adaptive Assassination)",
+  "dimensions": {
+    "min_x": -30.0,
+    "max_x": 30.0,
+    "min_y": -22.5,
+    "max_y": 22.5,
+    "width": 60.0,
+    "height": 45.0
+  },
+  "grid": {
+    "columns": ["W", "C", "E"],
+    "rows": ["N", "M", "S"],
+    "cell_width": 20.0,
+    "cell_height": 15.0
+  },
+  "sector_grid_coords": {
+    "NW": [-20.0, 15.0], "NC": [0.0, 15.0], "NE": [20.0, 15.0],
+    "MW": [-20.0, 0.0],  "MC": [0.0, 0.0],  "ME": [20.0, 0.0],
+    "SW": [-20.0, -15.0], "SC": [0.0, -15.0], "SE": [20.0, -15.0]
+  },
+  "sector_adjacency": [
+    ["NW", "NC"], ["NC", "NE"],
+    ["MW", "MC"], ["MC", "ME"],
+    ["SW", "SC"], ["SC", "SE"],
+    ["NW", "MW"], ["MW", "SW"],
+    ["NC", "MC"], ["MC", "SC"],
+    ["NE", "ME"], ["ME", "SE"]
+  ],
+  "modules": [
+    "WAREHOUSE_INTERIOR",
+    "FORTIFIED_PLAZA",
+    "SLUM_ALLEYWAYS",
+    "URBAN_HIGHWAY",
+    "INDUSTRIAL_DEPOT",
+    "WATERFRONT_DOCKS",
+    "SECURITY_COMPOUND",
+    "OPEN_STREET",
+    "VACANT_LOT"
+  ],
+  "connection_statuses": [
+    "open",
+    "barricaded_wire_fence",
+    "barricaded_concrete",
+    "walled_off"
+  ],
+  "module_notes": {
+    "WAREHOUSE_INTERIOR": "Tight indoor corridors, crate cover, 1-2 door cutouts. Favors stealth/ambush.",
+    "FORTIFIED_PLAZA": "Open exposed ground, sandbag/concrete barrier clusters. Favors direct assault.",
+    "SLUM_ALLEYWAYS": "Dark narrow alley paths, tenement facades. Favors stealth infiltration.",
+    "URBAN_HIGHWAY": "4-lane asphalt road, sidewalks. Favors vehicles and fast traversal.",
+    "INDUSTRIAL_DEPOT": "Yard with container stacks and fuel barrels. Favors explosive/destructive play.",
+    "WATERFRONT_DOCKS": "Pier with water hazard boundary. Dead-end escape or arrival sector.",
+    "SECURITY_COMPOUND": "Heavily walled perimeter with a guarded gate. Favors heavily armored final stands.",
+    "OPEN_STREET": "Generic navigable street connector, light cover.",
+    "VACANT_LOT": "Generic sparse open connector, minimal cover."
+  }
+}
