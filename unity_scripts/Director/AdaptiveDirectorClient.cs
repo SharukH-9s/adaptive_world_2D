@@ -148,6 +148,30 @@ namespace AdaptiveWorld2D.Director
         public EnvironmentManifest environment;
         public RoutesManifest routes;
         public RoomGraphManifest room_graph;
+
+        /// <summary>
+        /// Post-deserialization null-guard (§2.3A). Unity's JsonUtility does not
+        /// instantiate list fields that are missing or null in JSON, so any downstream
+        /// foreach over guards/props/sectors/connections would NullReferenceException.
+        /// Call this immediately after JsonUtility.FromJson&lt;MissionManifest&gt;().
+        /// </summary>
+        public void Sanitize()
+        {
+            if (room_graph == null) return;
+            room_graph.sectors     ??= new System.Collections.Generic.List<SectorConfig>();
+            room_graph.connections ??= new System.Collections.Generic.List<ConnectionConfig>();
+            foreach (var s in room_graph.sectors)
+            {
+                if (s == null) continue;
+                s.guards ??= new System.Collections.Generic.List<GuardEntityConfig>();
+                s.props  ??= new System.Collections.Generic.List<string>();
+            }
+            if (routes != null)
+            {
+                routes.blocked_routes       ??= new System.Collections.Generic.List<string>();
+                routes.reinforced_barricades ??= new System.Collections.Generic.List<string>();
+            }
+        }
     }
 
     [Serializable]
@@ -185,6 +209,53 @@ namespace AdaptiveWorld2D.Director
 
         public event Action<string> OnArchetypeChanged;
         public event Action<MissionManifest> OnManifestReceived;
+
+        // ── Disk Cache (§2.3B) ──────────────────────────────────────────────────
+        // Persists the latest manifest JSON to a Temp file so it survives Unity
+        // domain reloads (Editor script recompile). The cache is in Temp/ so it
+        // is never committed to version control but persists across Play sessions
+        // within a single Editor launch.
+        private const string CACHE_PATH = "Temp/AdaptiveWorld_LatestManifest.json";
+
+        /// <summary>Writes the latest manifest JSON to disk so it survives domain reloads.</summary>
+        public static void CacheManifestToDisk(string json)
+        {
+            try
+            {
+                System.IO.File.WriteAllText(CACHE_PATH, json);
+                Debug.Log($"[AdaptiveDirector] Manifest cached to {CACHE_PATH}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AdaptiveDirector] Could not write manifest cache: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Loads and deserializes the manifest from the on-disk cache.
+        /// Returns null if the cache file does not exist or is corrupt.
+        /// </summary>
+        public static MissionManifest LoadCachedManifest()
+        {
+            try
+            {
+                if (System.IO.File.Exists(CACHE_PATH))
+                {
+                    string json = System.IO.File.ReadAllText(CACHE_PATH);
+                    var m = JsonUtility.FromJson<MissionManifest>(json);
+                    m?.Sanitize();
+                    if (m != null)
+                        Debug.Log($"[AdaptiveDirector] Loaded manifest from disk cache (archetype={m.player_archetype}).");
+                    return m;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AdaptiveDirector] Failed to load disk cache: {ex.Message}");
+            }
+            return null;
+        }
+        // ────────────────────────────────────────────────────────────────────────
 
         private List<string> _rawEventsQueue = new List<string>();
         private float _flushTimer = 0f;
@@ -280,18 +351,42 @@ namespace AdaptiveWorld2D.Director
                 {
                     string json = req.downloadHandler.text;
                     MissionManifest manifest = JsonUtility.FromJson<MissionManifest>(json);
-                    latestManifest = manifest;
+
+                    // Sanitize null lists immediately after deserialization (§2.3A)
+                    manifest?.Sanitize();
+
+                    latestManifest   = manifest;
                     currentArchetype = manifest.player_archetype;
+
+                    // Persist to disk so domain reloads don't lose the manifest (§2.3B)
+                    CacheManifestToDisk(json);
 
                     Debug.Log($"[AdaptiveDirector] Received M2 Manifest! Target at {manifest.target.location_label}, Armor: {manifest.target.armor}");
                     LogRoomGraph(manifest.room_graph);
-                    OnManifestReceived?.Invoke(manifest);
+
+                    // Isolated multi-cast dispatch (§2.3C): a subscriber exception
+                    // will not halt remaining subscribers.
+                    DispatchManifest(manifest);
                     callback?.Invoke(manifest);
                 }
                 else
                 {
                     Debug.LogError($"[AdaptiveDirector] Failed to solve mission: {req.error}");
                 }
+            }
+        }
+
+        /// <summary>
+        /// Isolated multicast dispatch (§2.3C). Iterates each subscriber individually
+        /// inside a try/catch so a faulty subscriber cannot prevent others from running.
+        /// </summary>
+        private void DispatchManifest(MissionManifest manifest)
+        {
+            if (OnManifestReceived == null) return;
+            foreach (Action<MissionManifest> handler in OnManifestReceived.GetInvocationList())
+            {
+                try   { handler(manifest); }
+                catch (Exception ex) { Debug.LogException(ex); }
             }
         }
 

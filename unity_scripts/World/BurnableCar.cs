@@ -66,17 +66,35 @@ namespace AdaptiveWorld2D.World
 
             Debug.Log($"[BurnableCar] Car {carId} exploded into a fireball!");
 
-            // AOE Damage to nearby entities and walls
-            Collider2D[] inBlast = Physics2D.OverlapCircleAll(transform.position, explosionRadius);
-            foreach (var col in inBlast)
+            // Phase 4 fix: use targeted layer masks so AOE only hits enemies and
+            // destructible interactables — never inadvertently damages the player.
+            int enemyLayerMask = LayerMask.GetMask("Enemy");
+            int interactableLayerMask = LayerMask.GetMask("Interactable", "Building");
+
+            // Damage enemies in blast radius
+            Collider2D[] enemiesInBlast = Physics2D.OverlapCircleAll(transform.position, explosionRadius, enemyLayerMask);
+            foreach (var col in enemiesInBlast)
             {
                 if (col.gameObject == gameObject) continue;
-
-                var wall = col.GetComponent<DestructibleWall>();
-                if (wall != null) wall.DamageWall(explosionDamage);
-
                 var enemy = col.GetComponent<EnemyPatrol>();
                 if (enemy != null) enemy.TakeDamage(explosionDamage);
+            }
+
+            // Damage destructible walls/props in blast radius
+            Collider2D[] propsInBlast = Physics2D.OverlapCircleAll(transform.position, explosionRadius, interactableLayerMask);
+            foreach (var col in propsInBlast)
+            {
+                if (col.gameObject == gameObject) continue;
+                var wall = col.GetComponent<DestructibleWall>();
+                if (wall != null) wall.DamageWall(explosionDamage);
+            }
+
+            // Alert nearby enemies to the explosion noise (hearing check)
+            Collider2D[] alertRadius = Physics2D.OverlapCircleAll(transform.position, explosionRadius * 2.5f, enemyLayerMask);
+            foreach (var col in alertRadius)
+            {
+                var det = col.GetComponent<EnemyDetection>();
+                if (det != null) det.AlertToNoise(transform.position);
             }
 
             // Report telemetry

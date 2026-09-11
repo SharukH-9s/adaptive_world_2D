@@ -57,18 +57,53 @@ namespace AdaptiveWorld2D.Player
 
         private void HandleInput()
         {
-            float h = Input.GetAxisRaw("Horizontal");
-            float v = Input.GetAxisRaw("Vertical");
+            float h = 0f;
+            float v = 0f;
+
+            try
+            {
+                h = Input.GetAxisRaw("Horizontal");
+                v = Input.GetAxisRaw("Vertical");
+            }
+            catch { }
 
             // Direct key fallback in case Input Manager axes are not configured
             if (h == 0f && v == 0f)
             {
-                if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)) v += 1f;
-                if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) v -= 1f;
-                if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) h -= 1f;
-                if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) h += 1f;
+                try
+                {
+                    if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)) v += 1f;
+                    if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) v -= 1f;
+                    if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) h -= 1f;
+                    if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) h += 1f;
+                }
+                catch { }
             }
-            isSprinting = (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)) && !isDriving;
+
+#if ENABLE_INPUT_SYSTEM
+            if (h == 0f && v == 0f)
+            {
+                var kb = UnityEngine.InputSystem.Keyboard.current;
+                if (kb != null)
+                {
+                    if (kb.wKey.isPressed || kb.upArrowKey.isPressed) v += 1f;
+                    if (kb.sKey.isPressed || kb.downArrowKey.isPressed) v -= 1f;
+                    if (kb.aKey.isPressed || kb.leftArrowKey.isPressed) h -= 1f;
+                    if (kb.dKey.isPressed || kb.rightArrowKey.isPressed) h += 1f;
+                }
+            }
+#endif
+
+            bool shift = false;
+            try { shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift); } catch { }
+#if ENABLE_INPUT_SYSTEM
+            if (!shift)
+            {
+                var kb = UnityEngine.InputSystem.Keyboard.current;
+                if (kb != null) shift = kb.leftShiftKey.isPressed || kb.rightShiftKey.isPressed;
+            }
+#endif
+            isSprinting = shift && !isDriving;
 
             _moveInput = new Vector2(h, v).normalized;
 
@@ -82,13 +117,25 @@ namespace AdaptiveWorld2D.Player
 
         private void MoveCharacter()
         {
+            if (_rb == null) _rb = GetComponent<Rigidbody2D>();
+            if (_rb == null) return;
+
             float speed = isDriving ? driveSpeed : (isSprinting ? runSpeed : walkSpeed);
 
             // Kinematic bodies use MovePosition; Dynamic bodies use linearVelocity
             if (_rb.bodyType == RigidbodyType2D.Kinematic)
+            {
                 _rb.MovePosition(_rb.position + _moveInput * speed * Time.fixedDeltaTime);
+            }
             else
+            {
                 _rb.linearVelocity = _moveInput * speed;
+                // Direct positional fallback if velocity doesn't move body
+                if (_moveInput.sqrMagnitude > 0.001f && _rb.linearVelocity.sqrMagnitude == 0f)
+                {
+                    _rb.position += _moveInput * speed * Time.fixedDeltaTime;
+                }
+            }
 
             // Track distance
             Vector2 curPos = transform.position;

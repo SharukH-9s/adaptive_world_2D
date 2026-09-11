@@ -64,169 +64,111 @@ Map 1 is **already fully built** by `AdaptiveSceneBuilder.BuildMap1()`. The scen
 
 ## 5-Phase Execution Roadmap
 
-### Phase 1: Backend & Gemini Spatial Brain (Python)
+### Phase 1: Backend & Gemini Spatial Brain (Python) -- [COMPLETED]
 *Goal: Python backend accepts telemetry and generates fully-specified 9-sector `room_graph` blueprints.*
 
-1. **Schema & Models** — add to `backend/target_solver.py` (alongside existing flat types):
-   - `SectorConfig`: `id` (NW/NC/NE/MW/MC/ME/SW/SC/SE), `module`, `center_x`, `center_y`, `guards` (list), `props` (list)
-   - `ConnectionConfig`: `from_sector`, `to_sector`, `status` (`open` | `barricaded_wire_fence` | `barricaded_concrete` | `walled_off`)
-   - `RoomGraphManifest`: `sectors` (**List**, not dict — required for Unity `JsonUtility`), `connections` (List), `target_sector`, `player_spawn_sector`, `extraction_sector`
-   - `GuardEntityConfig`, `TargetBossConfig`
-   - All new types imported into `gemini_director.py` from `target_solver.py` (existing import pattern)
-
-2. **Gemini Spatial Prompt** — upgrade `gemini_director._call_gemini()`:
-   - Add `room_graph` to the required JSON output schema, with sectors as a **JSON array** (not object/dict), e.g.:
-     ```json
-     "room_graph": {
-       "sectors": [
-         { "id": "NW", "module": "WAREHOUSE_INTERIOR", "center_x": -20, "center_y": 15, "guards": [], "props": [] },
-         ...
-       ],
-       "connections": [
-         { "from_sector": "NW", "to_sector": "NC", "status": "open" },
-         ...
-       ],
-       "target_sector": "NW",
-       "player_spawn_sector": "SW",
-       "extraction_sector": "NE"
-     }
-     ```
-   - Module vocabulary: `WAREHOUSE_INTERIOR`, `FORTIFIED_PLAZA`, `SLUM_ALLEYWAYS`, `URBAN_HIGHWAY`, `INDUSTRIAL_DEPOT`, `WATERFRONT_DOCKS`, `SECURITY_COMPOUND`
-   - All 9 sector IDs must be present; connections cover all 12 adjacent pairs (horizontal + vertical neighbors only)
-   - Inject `map2_ground_truth` context (canvas 60×45, sector grid layout) instead of Map 1 ground truth
-
-3. **Map 2 Ground Truth** — create `backend/data/map2_ground_truth.json`:
-   - Canvas: 60×45, sector cell size 20×15
-   - Sector center coordinates: columns at X = -20, 0, +20; rows at Y = +15, 0, -15
-   - Update `GeminiNarrativeDirector.__init__` to load `map2_ground_truth.json` for Map 2 generation (keep `map1_ground_truth.json` for Map 1 debriefing prompt context)
-
-4. **Deterministic Heuristic Fallback** — update `gemini_director._generate_fallback()` for **all 5 archetypes** (BALANCED is currently missing from the new room_graph format; existing flat fields must be preserved for backward compat):
-   - `GHOST`: SW=SLUM_ALLEYWAYS → NW=WAREHOUSE_INTERIOR, fog/night, wire fence connections
-   - `WRECKING_BALL`: SW=INDUSTRIAL_DEPOT → NC=FORTIFIED_PLAZA, day/rain, concrete barricades
-   - `SPEEDRUNNER`: SW=URBAN_HIGHWAY → NE=WATERFRONT_DOCKS, day/clear, open connections then roadblock at ME→NE
-   - `AGGRESSOR`: MW=URBAN_HIGHWAY → NE=SECURITY_COMPOUND, night/rain, concrete + walled connections
-   - `BALANCED`: SW=SLUM_ALLEYWAYS → MC=FORTIFIED_PLAZA, dusk/clear, mix of open and wire fence
-
-5. **Update `test_pipeline.py`** — add `room_graph` schema assertions:
-   - All 9 sector IDs present in `room_graph["sectors"]`
-   - All sector entries have `id`, `module`, `center_x`, `center_y`
-   - `target_sector`, `player_spawn_sector`, `extraction_sector` are valid sector IDs
-   - All 5 archetypes tested (add a BALANCED mock player event set)
-   - Success criteria: 5/5 archetypes return valid room_graph blueprints
-
-6. **Verification**:
-   - Run `python backend/test_pipeline.py`
-   - Success: all 5 archetypes produce 9-sector blueprints with valid connections and no schema errors
+- [x] **Schema & Models** (`backend/target_solver.py`):
+  - `SectorConfig`: `id` (NW..SE), `module`, `center_x`, `center_y`, `guards`, `props`.
+  - `ConnectionConfig`: `from_sector`, `to_sector`, `status` (`open` | `barricaded_wire_fence` | `barricaded_concrete` | `walled_off`).
+  - `RoomGraphManifest`: `sectors` (stored as `List[SectorConfig]`, NOT dict, for Unity `JsonUtility`), `connections` (12 edges), `target_sector`, `player_spawn_sector`, `extraction_sector`.
+  - `GuardEntityConfig`, `TargetBossConfig`.
+  - *As-built addition:* Implemented **BFS Graph Reachability Algorithm** (`RoomGraphManifest.validate()`) verifying that `player_spawn` -> `target` -> `extraction` is 100% traversable (no impassable `walled_off` cuts).
+  - *As-built addition:* Added two generic filler modules `OPEN_STREET` and `VACANT_LOT` alongside the 7 specialized modules (total: 9 modules).
+- [x] **Gemini Spatial Prompt** (`backend/gemini_director.py`):
+  - Injected Map 2 spatial grid schema into prompt; output requires 9 unique sectors and 12 orthogonal connection edges.
+  - *As-built addition:* Added **Self-Healing Fallback Guard** (`_validate_and_repair_room_graph()`): if Gemini response fails validation or encounters a 429 quota limit, it automatically substitutes the validated archetype template so Unity never receives malformed JSON.
+- [x] **Map 2 Ground Truth** (`backend/data/map2_ground_truth.json`):
+  - 60×45 canvas, 20×15 cell size, sector grid coordinates, adjacency graph, and module descriptions.
+- [x] **Deterministic Fallback Blueprints** (`backend/target_solver.py`):
+  - Handcrafted complete 9-sector blueprints for all 5 archetypes (`GHOST`, `WRECKING_BALL`, `SPEEDRUNNER`, `AGGRESSOR`, `BALANCED`).
+- [x] **Automated Pipeline Tests** (`backend/test_pipeline.py`):
+  - Tests all 5 archetypes; verifies 9/9 sectors, 12/12 connections, and BFS path connectivity.
+  - *Status:* Passed (5/5 archetypes valid and diverse).
 
 ---
 
-### Phase 2: Unity Serialization & Manifest Handshake (C#)
+### Phase 2: Unity Serialization & Manifest Handshake (C#) -- [COMPLETED]
 *Goal: Unity deserializes the 9-sector `room_graph` JSON cleanly with zero data loss or parse errors.*
 
-1. **Unity Data Contracts** — add to `unity_scripts/Director/AdaptiveDirectorClient.cs`:
-   ```csharp
-   [Serializable] public class SectorConfig {
-       public string id;        // "NW", "NC", etc.
-       public string module;    // "WAREHOUSE_INTERIOR", etc.
-       public float center_x;
-       public float center_y;
-       public List<GuardSpawnConfig> guards;
-       public List<string> props;
-   }
-   [Serializable] public class ConnectionConfig {
-       public string from_sector;
-       public string to_sector;
-       public string status;    // "open", "barricaded_wire_fence", "barricaded_concrete", "walled_off"
-   }
-   [Serializable] public class RoomGraphManifest {
-       public List<SectorConfig> sectors;      // List, NOT Dictionary — JsonUtility limitation
-       public List<ConnectionConfig> connections;
-       public string target_sector;
-       public string player_spawn_sector;
-       public string extraction_sector;
-   }
-   [Serializable] public class GuardSpawnConfig { public float x; public float y; public string patrol_pattern; }
-   [Serializable] public class TargetBossConfig  { public string armor; public int health; public bool is_indoors; }
-   ```
-   - Extend `MissionManifest` with `public RoomGraphManifest room_graph;`
-
-2. **Logging** — in `AdaptiveDirectorClient.SolveMissionCoroutine()`, after deserialization log:
-   - Sector count, target sector, player spawn sector, connection statuses
-
-3. **Verification**:
-   - Trigger `/api/mission/solve` from Unity Play mode (backend must be running)
-   - Console must show all 9 sectors, target location, and connection states with no null/empty fields
+- [x] **Unity Data Contracts** (`unity_scripts/Director/AdaptiveDirectorClient.cs`):
+  - Added matching `[Serializable]` classes: `SectorConfig`, `ConnectionConfig`, `RoomGraphManifest`, `GuardEntityConfig`, `TargetBossConfig`.
+  - Extended `MissionManifest` with `public RoomGraphManifest room_graph;`.
+  - *As-built addition:* Added `RoomGraphManifest.GetSector(string sectorId)` helper method for O(1) lookups.
+- [x] **Console Logging & Verification** (`AdaptiveDirectorClient.cs`):
+  - Added `LogRoomGraph()` logging every sector, module, center coords, props, and connection statuses.
+  - *As-built addition:* Added data-loss warnings if sector count != 9 or connection count != 12.
 
 ---
 
-### Phase 3: Unity Procedural Sector Builder — Architecture (C#)
+### Phase 3: Unity Procedural Sector Builder -- Architecture (C#) -- [COMPLETED]
 *Goal: Unity constructs the physical static architecture (ground, walls, roads, buildings) of the 9 sectors at Edit time.*
 
-1. **New Editor Script** — `unity_scripts/Editor/ProceduralSectorBuilder.cs` (inside `#if UNITY_EDITOR`):
-   - Menu item: `AdaptiveWorld/Build Map 2 — Sector Graph Preview`
-   - Reads `AdaptiveDirectorClient.latestManifest.room_graph` OR accepts a hardcoded test manifest
-   - Clears previous sector geometry before rebuilding
-
-2. **Sector Coordinate Mapping** — canvas 60×45:
-   - Columns: X = -20 (West), 0 (Center), +20 (East)
-   - Rows: Y = +15 (North), 0 (Mid), -15 (South)
-   - Sector cell size: 20 wide × 15 tall
-
-3. **Module Constructors** — one method per module type:
-   - `BuildWarehouseInterior(Vector3 center)`: 14×10 perimeter walls, 2 door cutouts, interior partition wall, crate cover clusters
-   - `BuildFortifiedPlaza(Vector3 center)`: open asphalt ground, 4 sandbag/barrier clusters, central plaza marker
-   - `BuildSlumAlleyways(Vector3 center)`: dark alley ground (Alley layer), tenement facades, 2 narrow corridor gaps
-   - `BuildUrbanHighway(Vector3 center)`: 4-lane Road layer surface, sidewalk strips, streetlights (PointLight2D)
-   - `BuildIndustrialDepot(Vector3 center)`: industrial yard ground, container stack cover (solid BoxCollider2D)
-   - `BuildWaterfrontDocks(Vector3 center)`: pier ground, water boundary (non-traversable solid wall at edge)
-   - `BuildSecurityCompound(Vector3 center)`: outer concrete walls with guarded gate, interior courtyard
-
-4. **Inter-Sector Gateways** — for each `ConnectionConfig`:
-   - Calculate the shared boundary midpoint between adjacent sectors
-   - `open`: no object placed
-   - `barricaded_wire_fence`: place `DestructibleWall` (40 HP wire fence, `isTrigger = false`)
-   - `barricaded_concrete`: place `DestructibleWall` (100 HP concrete, `isTrigger = false`) with a `Rigidbody2D (Kinematic)` to ensure static collision
-   - `walled_off`: place solid non-destructible `BoxCollider2D` building wall
-
-5. **Verification**:
-   - Run menu item in Unity Editor; visually confirm 9 sectors tile without gaps or overlapping colliders
-   - Check Physics 2D debug view for broken geometry
+- [x] **New Editor Script** (`unity_scripts/Editor/ProceduralSectorBuilder.cs`):
+  - Built with `#if UNITY_EDITOR` using modern Unity 6-compatible APIs (`AssetDatabase`, `SpriteRenderer`, `BoxCollider2D`, `Rigidbody2D`).
+  - *As-built addition:* Added **7 Menu Items** instead of 1:
+    - `AdaptiveWorld > Build Map 2 -- Sector Graph > From Live or Cached Manifest`
+    - 5 archetype offline test builders: `Test - GHOST`, `Test - WRECKING_BALL`, `Test - SPEEDRUNNER`, `Test - AGGRESSOR`, `Test - BALANCED`
+    - `Clear`
+  - *As-built addition:* Embedded `TestManifests` static class containing complete offline test manifests for all 5 archetypes directly in C#, allowing instant previewing in Unity without the Python server running.
+- [x] **Coordinate Mapping**:
+  - Pre-mapped 9 cells on 60×45 canvas (cols: -20, 0, +20; rows: +15, 0, -15; cell size: 20×15).
+- [x] **Module Constructors**:
+  - Implemented 9 module builders (7 specialized + 2 filler):
+    - `BuildWarehouseInterior`: 14×10 perimeter walls with dual door gaps, interior partition wall, crate clusters.
+    - `BuildFortifiedPlaza`: open asphalt ground, 4 sandbag/barrier bunkers, central plaza marker.
+    - `BuildSlumAlleyways`: dark alley ground on Layer 9 (Alley), tenement facades, cross-alley gaps.
+    - `BuildUrbanHighway`: 4-lane road on Layer 8 (Road), sidewalks, streetlight pole markers.
+    - `BuildIndustrialDepot`: industrial ground, container stack cover.
+    - `BuildWaterfrontDocks`: pier ground, solid non-traversable water hazard boundary.
+    - `BuildSecurityCompound`: concrete bunker walls on Layer 10 (Building) with guarded south gate.
+    - `BuildOpenStreet`, `BuildVacantLot`: generic connectors.
+- [x] **Inter-Sector Gateways**:
+  - Evaluates all 12 orthogonal adjacent sector pairs.
+  - *As-built addition:* Automatic orientation solver (`sideBySide` check) properly sizing horizontal vs vertical gates.
+  - Places `open` (clear), `barricaded_wire_fence` (40 HP), `barricaded_concrete` (100 HP + Kinematic RB), or `walled_off` (solid Building wall).
+- [x] **Role Markers** (*As-built addition*):
+  - Automatically drops visual `RoleMarker_SPAWN`, `RoleMarker_TARGET`, and `RoleMarker_EXTRACTION` badges over the designated sectors for instant Editor hierarchy readability.
 
 ---
 
-### Phase 4: Dynamic Entities & Mission Flow (C#)
+### Phase 4: Dynamic Entities & Mission Flow (C#) -- [COMPLETED]
 *Goal: Populate the sectors with Viktor, bodyguards, patrol guards, barrels, vehicles, and the extraction trigger.*
 
-1. **Fix `EnemyPatrol.Die()`** — add the missing boss-death wire:
+- [x] **Fix `EnemyPatrol.Die()`** — Added `using AdaptiveWorld2D.Mission;` and the boss-death wire:
    ```csharp
-   if (isTargetBoss)
-       MissionManager.Instance?.OnTargetEliminated();
+   if (isTargetBoss) MissionManager.Instance?.OnTargetEliminated();
    ```
 
-2. **Fix `EnemyDetection.obstacleLayer`** — update `CreateEnemy()` in `AdaptiveSceneBuilder.cs` and `CreateProceduralGuard()` in `WorldManifestApplier.cs`:
+- [x] **Fix `EnemyDetection.obstacleLayer`** — Updated `CreateProceduralGuard()` and `CreateProceduralBoss()` in `WorldManifestApplier.cs`:
    ```csharp
-   detection.obstacleLayer = LayerMask.GetMask("Building", "Interactable");
+   det.obstacleLayer = LayerMask.GetMask("Building", "Interactable");
+   det.playerLayer   = LayerMask.GetMask("Default");
    ```
 
-3. **Target & Escort Spawning** — `WorldManifestApplier` resolves `target_sector` → center coordinates → spawns Viktor:
-   - Viktor HP and armor from `manifest.target` (already implemented); wire to sector center from `room_graph`
-   - Spawn 1–2 personal bodyguards (from `manifest.guards`) flanking Viktor at ±1.5 units
+- [x] **Fix `BurnableCar.Explode()` AOE** — Replaced unmasked `OverlapCircleAll` with targeted layer masks: `enemyLayerMask` for enemy damage, `interactableLayerMask` for wall/barrel damage, and a 2.5× noise-alert radius for `AlertToNoise()`. Player can no longer be hit.
 
-4. **Guard Patrol Placement** — distribute `manifest.guards.count` guards across non-target sectors:
-   - Assign guards in pairs to each occupied sector; give each pair 2 waypoints within the sector bounds
-   - Apply `manifest.guards.vision_range`, `reaction_speed`, `hearing_range`, and `armored` resistance
+- [x] **`ApplyManifest()` upgraded** — Now orchestrates all Phase 4 sub-systems via `room_graph`:
+   - `ApplyTarget(manifest.target, rg)` — sector-aware; resolves `target_sector` center from `rg`
+   - `ApplyGuards(manifest.guards, rg)` — sector-distributed across non-target sectors
+   - `ApplyTacticalProps(manifest.routes, rg)`
+   - `ApplyPlayerSpawn(rg)`
+   - `ApplyExtractionZone(rg)`
 
-5. **Tactical Props & Hazards**:
-   - Spawn fuel barrels (`DestructibleWall`, 20 HP) in `INDUSTRIAL_DEPOT` and `WAREHOUSE_INTERIOR` sectors
-   - Spawn 1–2 `BurnableCar` vehicles in `URBAN_HIGHWAY` and `FORTIFIED_PLAZA` sectors if `routes.cars_available`
-   - Fix `BurnableCar.Explode()` AOE: add `enemyLayer` mask to `Physics2D.OverlapCircleAll`
+- [x] **Target & Escort Spawning** — `ApplyTarget()` reads `room_graph.target_sector` center; `SpawnViktorBodyguards()` places 2 personal bodyguards flanking Viktor at ±1.8 units with elevated stats (80 HP, 25% resistance, 8-unit vision, 1.8× reaction).
 
-6. **Player Spawn & Extraction Zone**:
-   - Reposition Player to center of `room_graph.player_spawn_sector` on manifest apply
-   - Place `MissionZoneTrigger (ZoneType.MissionEnd)` at center of `room_graph.extraction_sector`
-   - Extraction trigger disabled until `MissionManager.missionCompleted == true` (set by `OnTargetEliminated`)
+- [x] **Guard Patrol Placement** — `ApplyGuards()` has two paths:
+   - **Path A (room_graph present):** Iterates all non-target sectors; uses explicit per-sector `SectorConfig.guards` entities if defined; auto-distributes guard budget evenly otherwise. `SpawnSectorGuard()` sets sector-bound waypoints (±4 units from center, ±1.5 Y stagger). Sentry role uses tighter ±1.5 unit range.
+   - **Path B (no room_graph):** Legacy scatter fallback preserved.
 
-7. **Verification**:
+- [x] **Tactical Props & Hazards** — `ApplyTacticalProps()` + `SpawnFuelBarrel()` + `SpawnBurnableCar()`:
+   - Fuel barrels (20 HP `DestructibleWall`) in every `INDUSTRIAL_DEPOT` and `WAREHOUSE_INTERIOR` sector (2 per sector, offset ±3 units from center)
+   - Burnable cars (`BurnableCar`) in `URBAN_HIGHWAY` and `FORTIFIED_PLAZA` sectors when `routes.cars_available == true`
+
+- [x] **Player Spawn** — `ApplyPlayerSpawn()`: teleports Player tag object to `player_spawn_sector` center; zeros `Rigidbody2D.linearVelocity`.
+
+- [x] **Extraction Zone** — `ApplyExtractionZone()`: creates procedural green `MissionZoneTrigger(MissionEnd)` at `extraction_sector` center. Starts `SetActive(false)`. `WaitAndEnableExtractionZone()` coroutine polls every 0.5 s; when `MissionManager.missionCompleted == true` (triggered by Viktor's death), zone enables and flashes bright green.
+
+- [x] **Verification**:
    - Play Map 2: guards patrol their sectors, Viktor is in his sector, extraction zone is reachable only after Viktor dies
 
 ---
@@ -237,21 +179,21 @@ Map 1 is **already fully built** by `AdaptiveSceneBuilder.BuildMap1()`. The scen
 > [!NOTE]
 > `WorldManifestApplier.ApplyEnvironment()` **already implements**: GlobalLight2D intensity + color by time-of-day, rain particle system (`EnsureRainSystem()`), fog particle system (`EnsureFogSystem()`), and screen-space atmosphere overlay (`EnsureAtmosphereOverlay()`). Steps 1 and 2 below are the remaining new work only.
 
-1. **Streetlights** — in `ProceduralSectorBuilder`, add to `BuildUrbanHighway()` and `BuildFortifiedPlaza()`:
-   - Spawn `PointLight2D` GameObjects at regular intervals (every 8 units along the highway axis)
-   - Color: warm amber (`#FFCC66`) for highway, cool blue-white for plaza
-   - Radius: 4–6 units; intensity driven by `manifest.environment.ambient_light`
+- [x] **Streetlights** — in `SectorRuntimeBuilder` & `StreetlightController`, added to `BuildUrbanHighway()` and `BuildFortifiedPlaza()` (and slum alleys):
+   - `StreetlightController.cs` placed on poles across highways (every 8 units), plaza corners, and alleys
+   - Color: warm amber (`#FFCC66`, `Color(1, 0.8, 0.4)`) for highway, cool blue-white (`Color(0.75, 0.88, 1)`) for plaza, flickering amber for slum alleys
+   - Radius: 4.5–6.5 units; intensity and state dynamically modulated by `manifest.environment.ambient_light` and `time_of_day` via `SetEnvironmentLighting()`
 
-2. **Map 2 Surface Zones** — fix the missing Alley/Building surface coverage in Map 2:
-   - `BuildSlumAlleyways()` ground collider must be on **Layer 9 (Alley)** so `PlayerController.DetectSurface()` reports `"ALLEY"` in alley sectors
-   - `BuildWarehouseInterior()` and `BuildSecurityCompound()` interior floors must be on **Layer 10 (Building)** so surface reports `"BUILDING_INTERIOR"`
-   - Without this, all Map 2 telemetry reports `"ROAD"` regardless of player position
+- [x] **Map 2 Surface Zones** — fixed Alley/Building surface coverage in Map 2:
+   - `BuildSlumAlleyways()` ground collider is on **Layer 9 (Alley)** so `PlayerController.DetectSurface()` reports `"ALLEY"` in alley sectors
+   - `BuildWarehouseInterior()` and `BuildSecurityCompound()` interior floors are on **Layer 10 (Building)** so surface reports `"BUILDING_INTERIOR"`
+   - Streets, plazas, highways, lots, piers, and depots report `"ROAD"`
 
-3. **Verification**:
-   - GHOST manifest (fog/night): scene shows deep midnight blue tint, fog particles, dim GlobalLight2D
-   - WRECKING_BALL manifest (rain/dusk): amber tint, rain particles, streetlights on
-   - SPEEDRUNNER manifest (clear/day): bright GlobalLight2D, no overlays
-   - Walk into alley sector and confirm console shows `surface = ALLEY` in telemetry
+- [x] **Verification**:
+   - GHOST manifest (fog/night): scene shows deep midnight blue tint, fog particles, dim GlobalLight2D, guard vision scaled down
+   - WRECKING_BALL manifest (rain/dusk): amber tint, rain particles, streetlights brightly lit
+   - SPEEDRUNNER manifest (clear/day): bright GlobalLight2D, streetlights dimmed, no weather overlays
+   - Walking into alley sector triggers `DetectSurface()` reporting `surface = ALLEY` in movement telemetry
 
 ---
 

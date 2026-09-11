@@ -81,6 +81,7 @@ namespace AdaptiveWorld2D.Player
             RaycastHit2D hit = Physics2D.Raycast(origin, dir, gunRange, enemyLayer);
             Vector2 endPoint = hit.collider != null ? hit.point : (origin + dir * gunRange);
             StartCoroutine(DrawBulletTracer(origin, endPoint));
+            StartCoroutine(DrawMuzzleFlash(origin));
             if (hit.collider != null)
             {
                 var enemy = hit.collider.GetComponent<EnemyPatrol>();
@@ -145,6 +146,7 @@ namespace AdaptiveWorld2D.Player
 
         private void AlertNearbyEnemies(Vector2 soundOrigin, float radius)
         {
+            // Local radius alert
             Collider2D[] guards = Physics2D.OverlapCircleAll(soundOrigin, radius, enemyLayer);
             foreach (var g in guards)
             {
@@ -153,6 +155,12 @@ namespace AdaptiveWorld2D.Player
                 {
                     detection.AlertToNoise(soundOrigin);
                 }
+            }
+
+            // Gateway Alert Cascade (§4.3B) — propagate gunshot noise through open gateways in the sector graph
+            if (AdaptiveDirectorClient.latestManifest != null && AdaptiveDirectorClient.latestManifest.room_graph != null)
+            {
+                AlertSystem.BroadcastAlert(soundOrigin, AdaptiveDirectorClient.latestManifest.room_graph);
             }
         }
 
@@ -172,6 +180,42 @@ namespace AdaptiveWorld2D.Player
 
             yield return new WaitForSeconds(0.06f);
             Destroy(tracerObj);
+        }
+
+        /// <summary>
+        /// Momentary dynamic muzzle flash light (§5.3C — Cinematic Visual Polish).
+        /// Illuminates the tactical radius around the shooter for 0.05 seconds.
+        /// </summary>
+        private System.Collections.IEnumerator DrawMuzzleFlash(Vector2 pos)
+        {
+            GameObject flashObj = new GameObject("MuzzleFlashLight");
+            flashObj.transform.position = new Vector3(pos.x, pos.y, 0f);
+
+#if UNITY_URP || UNITY_2021_2_OR_NEWER
+            // Attach 2D point light if Universal Render Pipeline 2D lighting is present
+            var lightType = System.Type.GetType("UnityEngine.Rendering.Universal.Light2D, Unity.RenderPipelines.Universal.Runtime");
+            if (lightType != null)
+            {
+                var lightComp = flashObj.AddComponent(lightType);
+                var colorProp = lightType.GetProperty("color");
+                var intensityProp = lightType.GetProperty("intensity");
+                var radiusProp = lightType.GetProperty("pointLightOuterRadius");
+
+                colorProp?.SetValue(lightComp, new Color(1f, 0.85f, 0.4f, 1f));
+                intensityProp?.SetValue(lightComp, 2.5f);
+                radiusProp?.SetValue(lightComp, 5.0f);
+            }
+#endif
+
+            // Fallback visual flash glow quad
+            SpriteRenderer sr = flashObj.AddComponent<SpriteRenderer>();
+            sr.sprite = WorldManifestApplier.GetUniversalWhiteSprite();
+            sr.color = new Color(1f, 0.9f, 0.5f, 0.75f);
+            sr.sortingOrder = 15;
+            flashObj.transform.localScale = new Vector3(0.4f, 0.4f, 1f);
+
+            yield return new WaitForSeconds(0.05f);
+            Destroy(flashObj);
         }
 
         private void OnDrawGizmosSelected()

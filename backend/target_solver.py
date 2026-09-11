@@ -1,4 +1,4 @@
-﻿"""
+"""
 target_solver.py
 ----------------
 Mission 2 Generator: reads the player profile from M1 and outputs a
@@ -322,6 +322,8 @@ class TargetBossConfig:
     only references its sector via `RoomGraphManifest.target_sector`."""
     name: str = "Viktor"
     sector_id: str = "NW"
+    offset_x: float = 0.0
+    offset_y: float = 0.0
     armor: str = "medium"
     health: int = 100
     movement: str = "patrol"
@@ -419,6 +421,40 @@ class RoomGraphManifest:
         traversable: dict = {}
         for c in self.connections:
             if _c(c, "status") in IMPASSABLE_STATUSES:
+                continue
+            a, b = _c(c, "from_sector"), _c(c, "to_sector")
+            traversable.setdefault(a, set()).add(b)
+            traversable.setdefault(b, set()).add(a)
+
+        visited = {start}
+        frontier = [start]
+        while frontier:
+            nxt = []
+            for node in frontier:
+                for neighbor in traversable.get(node, ()):
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        nxt.append(neighbor)
+            frontier = nxt
+        return goal in visited
+
+    def _is_gear_feasible(self, start: str, goal: str, has_explosive_or_car: bool = True) -> bool:
+        """Verifies that high-health concrete barricades can actually be bypassed (§1.3B).
+        If the player lacks heavy breaching tools (explosives or cars), concrete barricades
+        are effectively impassable and treated like walled_off."""
+        if start == goal:
+            return True
+
+        def _c(conn, attr):
+            return conn[attr] if isinstance(conn, dict) else getattr(conn, attr)
+
+        impassable = set(IMPASSABLE_STATUSES)
+        if not has_explosive_or_car:
+            impassable.add("barricaded_concrete")
+
+        traversable: dict = {}
+        for c in self.connections:
+            if _c(c, "status") in impassable:
                 continue
             a, b = _c(c, "from_sector"), _c(c, "to_sector")
             traversable.setdefault(a, set()).add(b)

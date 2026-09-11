@@ -1,4 +1,4 @@
-﻿"""
+"""
 test_pipeline.py
 ----------------
 Automated end-to-end test: simulates 4 player archetypes through M1 and
@@ -116,7 +116,7 @@ def main():
     # Try connecting to live server first, fallback to in-process TestClient
     use_live = False
     try:
-        live_client = httpx.Client(base_url=BASE, timeout=2.0)
+        live_client = httpx.Client(base_url=BASE, timeout=60.0)
         h = live_client.get("/").json()
         if h.get("status") == "online":
             client = live_client

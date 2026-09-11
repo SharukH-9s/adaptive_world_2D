@@ -88,9 +88,39 @@ public static class AdaptiveSceneBuilder
     }
 
     // ═════════════════════════════════════════════════════════════
+    //  BATCH BUILD & SAVE BOTH MAPS
+    // ═════════════════════════════════════════════════════════════
+    [MenuItem("AdaptiveWorld/Build & Save BOTH Maps (Map 1 & Map 2)", priority = 0)]
+    public static void BuildAndSaveBothMaps()
+    {
+        Debug.Log("[SceneBuilder] === BATCH BUILDING BOTH MAPS ===");
+
+        // 1. Open and build Map 1
+        var map1Scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene("Assets/Scenes/Map1.unity");
+        BuildMap1();
+        UnityEditor.SceneManagement.EditorSceneManager.SaveScene(map1Scene);
+        Debug.Log("[SceneBuilder] Saved Map1.unity successfully.");
+
+        // 2. Open and build Map 2
+        var map2Scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene("Assets/Scenes/Map2.unity");
+        BuildMap2();
+        UnityEditor.SceneManagement.EditorSceneManager.SaveScene(map2Scene);
+        Debug.Log("[SceneBuilder] Saved Map2.unity successfully.");
+
+        // 3. Return to Map 1
+        UnityEditor.SceneManagement.EditorSceneManager.OpenScene("Assets/Scenes/Map1.unity");
+        Debug.Log("[SceneBuilder] Switched back to Map 1. Ready to play!");
+
+        EditorUtility.DisplayDialog("Build Complete!",
+            "Both Map 1 and Map 2 were built and saved directly to disk!\n\n" +
+            "Map 1 is now open in the editor.\n\n" +
+            "Press PLAY to test the full mission loop!", "Let's Go!");
+    }
+
+    // ═════════════════════════════════════════════════════════════
     //  MAP 1  —  Phase 2 Full City "Pauper Streets"
     // ═════════════════════════════════════════════════════════════
-    [MenuItem("AdaptiveWorld/Build Map 1 — Full Phase 2 City (Pauper Streets)")]
+    [MenuItem("AdaptiveWorld/Build Map 1 — Full Phase 2 City (Pauper Streets)", priority = 10)]
     public static void BuildMap1()
     {
         Debug.Log("[SceneBuilder] === BUILDING MAP 1 — FULL PHASE 2 CITY ===");
@@ -135,14 +165,20 @@ public static class AdaptiveSceneBuilder
         GameObject gm = BuildGameManager(player);
         BuildUI(gm, "MISSION 1: Reach the Underground Gun Shop — then escape the city.");
 
-        Debug.Log("[SceneBuilder] MAP 1 BUILT SUCCESSFULLY. Save the scene now (Ctrl+S).");
-        EditorUtility.DisplayDialog("Map 1 Built!",
-            "Phase 2 Map 1 — Pauper Streets is ready!\n\n" +
+        // Auto-save to disk so user never encounters an empty scene on load
+        UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(
+            UnityEngine.SceneManagement.SceneManager.GetActiveScene());
+        UnityEditor.SceneManagement.EditorSceneManager.SaveScene(
+            UnityEngine.SceneManagement.SceneManager.GetActiveScene());
+
+        Debug.Log("[SceneBuilder] MAP 1 BUILT AND SAVED TO DISK SUCCESSFULLY.");
+        EditorUtility.DisplayDialog("Map 1 Built & Saved!",
+            "Phase 2 Map 1 — Pauper Streets is ready and saved to disk!\n\n" +
             "  NORTH  — 2 Warehouses, SWAT guard, explosive barrels, briefcase loot\n" +
             "  CENTER — 4-lane boulevard, 2 cop patrols, police cruiser, 3 civilians\n" +
             "  SOUTH  — Dark alleys, 2 gang thugs, wire fences, shadows\n\n" +
             "Total entities: 41\n\n" +
-            "Save the scene now (Ctrl+S).", "Got it!");
+            "Press PLAY to start!", "Got it!");
     }
 
     private static void ClearAllExceptCamera()
@@ -813,18 +849,21 @@ public static class AdaptiveSceneBuilder
     }
 
     // ═════════════════════════════════════════════════════════════
-    //  MAP 2  —  Adaptive Assassination Foundation (Phase 1 legacy)
+    //  MAP 2  —  Adaptive Assassination Foundation & Sector Graph
     // ═════════════════════════════════════════════════════════════
-    [MenuItem("AdaptiveWorld/Build Map 2 — Adaptive Assassination Foundation")]
+    [MenuItem("AdaptiveWorld/Build Map 2 — Adaptive Assassination Foundation", priority = 11)]
     public static void BuildMap2()
     {
         Debug.Log("[SceneBuilder] === BUILDING MAP 2 ===");
 
         ClearAllExceptCamera();
 
-        BuildCityEnvironment_Legacy();
-        GameObject player      = BuildPlayer(new Vector3(-22f, -12f, 0f));
-        SetupCamera(player, new Vector3(-22f, -12f, -10f));
+        // Clear legacy road if present
+        GameObject legacyRoad = GameObject.Find("CityRoad_Main");
+        if (legacyRoad != null) Object.DestroyImmediate(legacyRoad);
+
+        GameObject player      = BuildPlayer(new Vector3(-20f, -15f, 0f));
+        SetupCamera(player, new Vector3(-20f, -15f, -10f));
 
         PlayerCombat combat = player.GetComponent<PlayerCombat>();
         if (combat != null)
@@ -844,14 +883,24 @@ public static class AdaptiveSceneBuilder
         BuildGuardInfrastructure(applier);
         BuildUI(gm, "MISSION 2: Eliminate the target. Route determined by the AI Director.");
 
-        Debug.Log("[SceneBuilder] MAP 2 BUILT SUCCESSFULLY. Save the scene (Ctrl+S).");
-        EditorUtility.DisplayDialog("Map 2 Built!",
-            "Map 2 — Adaptive Assassination Foundation ready!\n\n" +
+        // Build default balanced sector architecture for editor preview
+        SectorRuntimeBuilder.Build(ProceduralSectorBuilder.TestManifests.Balanced());
+
+        // Auto-save to disk so Map2.unity is permanently serialized
+        UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(
+            UnityEngine.SceneManagement.SceneManager.GetActiveScene());
+        UnityEditor.SceneManagement.EditorSceneManager.SaveScene(
+            UnityEngine.SceneManagement.SceneManager.GetActiveScene());
+
+        Debug.Log("[SceneBuilder] MAP 2 BUILT AND SAVED TO DISK SUCCESSFULLY.");
+        EditorUtility.DisplayDialog("Map 2 Built & Saved!",
+            "Map 2 — Adaptive Assassination Foundation ready and saved to disk!\n\n" +
+            "• 9-Sector Tactical Graph (Balanced Baseline Preview)\n" +
             "• WorldManifestApplier wired\n" +
             "• 12 guard spawn points\n" +
             "• 5 location anchors\n" +
             "• 4 route barricades\n\n" +
-            "Save the scene (Ctrl+S).", "Got it!");
+            "Scene file saved automatically.", "Got it!");
     }
 
     private static void BuildCityEnvironment_Legacy()

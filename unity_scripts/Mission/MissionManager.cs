@@ -36,12 +36,20 @@ namespace AdaptiveWorld2D.Mission
             bool isMap2 = IsMap2Scene();
 
             if (playerCombat == null)
+#if UNITY_2023_1_OR_NEWER
+                playerCombat = FindAnyObjectByType<PlayerCombat>();
+#else
                 playerCombat = FindObjectOfType<PlayerCombat>();
+#endif
 
             // Auto-find objectiveText if Inspector slot is empty
             if (objectiveText == null)
             {
+#if UNITY_2023_1_OR_NEWER
+                var allTexts = FindObjectsByType<Text>();
+#else
                 var allTexts = FindObjectsOfType<Text>();
+#endif
                 foreach (var t in allTexts)
                 {
                     if (t.name == "ObjectiveText" || t.gameObject.name == "ObjectiveText")

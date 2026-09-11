@@ -18,6 +18,13 @@ namespace AdaptiveWorld2D.AI
         [Header("Alert UI")]
         public GameObject alertIconObject;
 
+        /// <summary>
+        /// The base (unscaled) vision range set by the manifest.
+        /// Stored so weather scaling can always compute from the original value
+        /// rather than compounding repeated multiplications.
+        /// </summary>
+        private float _baseVisionRange = -1f;
+
         private EnemyPatrol _patrol;
         private Transform _playerTransform;
         private float _awarenessTimer = 0f;
@@ -33,6 +40,10 @@ namespace AdaptiveWorld2D.AI
             var p = GameObject.FindGameObjectWithTag("Player");
             if (p != null) _playerTransform = p.transform;
             if (alertIconObject != null) alertIconObject.SetActive(false);
+
+            // Capture the initial inspector-assigned range as the base
+            if (_baseVisionRange < 0f)
+                _baseVisionRange = visionRange;
         }
 
         private void Update()
@@ -87,6 +98,43 @@ namespace AdaptiveWorld2D.AI
             }
         }
 
+        /// <summary>
+        /// Scales the effective vision range by the manifest environment visibility value.
+        /// Formula: effectiveVisionRange = baseVisionRange × visibility
+        /// (§5.3B — Weather-Gameplay Feedback Loop)
+        ///
+        /// Example: heavy fog with visibility=0.5 drops a 6.0-unit cone to 3.0 units,
+        /// actively rewarding stealth players in bad weather.
+        /// </summary>
+        /// <param name="visibility">0.0 (blind) to 1.0 (full visibility). Values above 1 allowed for buff conditions.</param>
+        public void SetWeatherVisibility(float visibility)
+        {
+            // Capture base range on first call if Start() hasn't run yet
+            if (_baseVisionRange < 0f)
+                _baseVisionRange = visionRange;
+
+            visionRange = _baseVisionRange * Mathf.Clamp(visibility, 0.05f, 2.0f);
+            Debug.Log($"[EnemyDetection] Vision range scaled to {visionRange:F2} (base={_baseVisionRange:F2} × visibility={visibility:F2})");
+        }
+
+        /// <summary>
+        /// Directly sets the base vision range AND recalculates the effective range
+        /// using the last applied visibility multiplier. Called by WorldManifestApplier
+        /// when applying guard stats, so subsequent weather scaling starts from the
+        /// correct manifest-driven base.
+        /// </summary>
+        public void SetBaseVisionRange(float range)
+        {
+            _baseVisionRange = range;
+            visionRange = range; // Reset to full before visibility is applied
+        }
+
+        /// <summary>Force-alerts the guard (used by AlertSystem sector broadcast and EnemyPatrol.Alert()).</summary>
+        public void OnForceAlert()
+        {
+            TriggerAlert();
+        }
+
         private void TriggerAlert()
         {
             _patrol.isAlerted = true;
@@ -103,6 +151,13 @@ namespace AdaptiveWorld2D.AI
             Vector3 rightRay = Quaternion.Euler(0, 0, -visionAngle * 0.5f) * transform.up * visionRange;
             Gizmos.DrawRay(transform.position, leftRay);
             Gizmos.DrawRay(transform.position, rightRay);
+
+            // Draw base range in a different color if weather has scaled it
+            if (_baseVisionRange > 0f && !Mathf.Approximately(_baseVisionRange, visionRange))
+            {
+                Gizmos.color = new Color(1f, 0.8f, 0f, 0.4f);
+                Gizmos.DrawWireSphere(transform.position, _baseVisionRange);
+            }
         }
     }
 }

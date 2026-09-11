@@ -28,7 +28,12 @@ namespace AdaptiveWorld2D.World
 
         private void LateUpdate()
         {
-            if (target == null) return;
+            if (target == null)
+            {
+                GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+                if (playerObj != null) target = playerObj.transform;
+                else return;
+            }
 
             Vector3 targetPos = new Vector3(target.position.x + offset.x, target.position.y + offset.y, cameraZ);
             transform.position = Vector3.Lerp(transform.position, targetPos, smoothSpeed * Time.deltaTime);
