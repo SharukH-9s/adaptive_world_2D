@@ -1,6 +1,5 @@
 #if UNITY_EDITOR
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 using UnityEditor;
 using AdaptiveWorld2D.Director;
@@ -34,26 +33,9 @@ using AdaptiveWorld2D.World;
 /// </summary>
 public static class ProceduralSectorBuilder
 {
-    // ─────────────────────────────────────────────────────────────
-    //  Layer indices (must match Edit > Project Settings > Layers -- see AdaptiveSceneBuilder.cs)
-    // ─────────────────────────────────────────────────────────────
-    private const int LAYER_INTERACTABLE = 6;
-    private const int LAYER_ROAD         = 8;
-    private const int LAYER_ALLEY        = 9;
-    private const int LAYER_BUILDING     = 10;
-
-    private const float CELL_WIDTH  = 20f;
-    private const float CELL_HEIGHT = 15f;
-    private const string ROOT_NAME = "Map2_SectorGraph";
-
-    private static readonly Dictionary<string, Vector2> SectorCoords = new Dictionary<string, Vector2>
-    {
-        { "NW", new Vector2(-20f, 15f) }, { "NC", new Vector2(0f, 15f) }, { "NE", new Vector2(20f, 15f) },
-        { "MW", new Vector2(-20f,  0f) }, { "MC", new Vector2(0f,  0f) }, { "ME", new Vector2(20f,  0f) },
-        { "SW", new Vector2(-20f,-15f) }, { "SC", new Vector2(0f,-15f) }, { "SE", new Vector2(20f,-15f) },
-    };
-
     // All 12 unique adjacent pairs (horizontal + vertical neighbors only, no diagonals).
+    // Layer indices, cell dimensions, ROOT_NAME, SectorCoords, and ValidStatuses are
+    // defined in SectorRuntimeBuilder and referenced directly via SectorRuntimeBuilder.*
     private static readonly (string a, string b)[] Adjacency =
     {
         ("NW","NC"), ("NC","NE"),
@@ -62,11 +44,6 @@ public static class ProceduralSectorBuilder
         ("NW","MW"), ("MW","SW"),
         ("NC","MC"), ("MC","SC"),
         ("NE","ME"), ("ME","SE"),
-    };
-
-    private static readonly HashSet<string> ValidStatuses = new HashSet<string>
-    {
-        "open", "barricaded_wire_fence", "barricaded_concrete", "walled_off"
     };
 
     // ═════════════════════════════════════════════════════════════
@@ -157,7 +134,7 @@ public static class ProceduralSectorBuilder
     {
         private static SectorConfig S(string id, string module, List<GuardEntityConfig> guards = null, List<string> props = null)
         {
-            Vector2 c = SectorCoords[id];
+            Vector2 c = SectorRuntimeBuilder.SectorCoords[id];
             return new SectorConfig
             {
                 id = id,

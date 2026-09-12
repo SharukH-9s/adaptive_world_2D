@@ -144,7 +144,7 @@ namespace AdaptiveWorld2D.Director
         }
 
         /// <summary>Returns true when the active scene is the Map 2 assassination mission.</summary>
-        private static bool IsMap2Scene() =>
+        public static bool IsMap2Scene() =>
             UnityEngine.SceneManagement.SceneManager.GetActiveScene().name
                 .IndexOf("Map2", StringComparison.OrdinalIgnoreCase) >= 0;
 
@@ -165,8 +165,8 @@ namespace AdaptiveWorld2D.Director
                 SectorRuntimeBuilder.Build(rg);
             }
 
-            try { ApplyTarget(manifest.target, rg); } catch (Exception ex) { Debug.LogException(ex); }
-            try { ApplyGuards(manifest.guards, rg); } catch (Exception ex) { Debug.LogException(ex); }
+            try { ApplyGuards(manifest.guards, rg); }  catch (Exception ex) { Debug.LogException(ex); }
+            try { ApplyTarget(manifest.target, rg); }  catch (Exception ex) { Debug.LogException(ex); }
             try { ApplyEnvironment(manifest.environment); } catch (Exception ex) { Debug.LogException(ex); }
             try { ApplyRoutes(manifest.routes); } catch (Exception ex) { Debug.LogException(ex); }
             try { ApplyTacticalProps(manifest.routes, rg); } catch (Exception ex) { Debug.LogException(ex); }
@@ -364,8 +364,8 @@ namespace AdaptiveWorld2D.Director
         {
             if (g == null) return;
 
-            // Clear previous guards (bodyguards were already added — don't clear them yet;
-            // they'll be added after Viktor spawns, so clear list first and re-add)
+            // Clear all previously spawned guards before redistributing.
+            // ApplyTarget runs after this, so bodyguards added there are safe.
             foreach (var guard in _activeGuards)
             {
                 if (guard != null) Destroy(guard);
@@ -391,7 +391,7 @@ namespace AdaptiveWorld2D.Director
                 foreach (var sector in rg.sectors)
                 {
                     // Skip the target sector — bodyguards (Viktor's escort) are spawned
-                    // separately by SpawnViktorBodyguards() after ApplyTarget().
+                    // separately by SpawnViktorBodyguards() inside ApplyTarget, which runs after ApplyGuards.
                     if (sector.id == rg.target_sector) continue;
 
                     if (spawned >= maxGuards) break;
@@ -1382,7 +1382,8 @@ namespace AdaptiveWorld2D.Director
             return f;
         }
 
-        private static void CreateRuntimeUI(GameObject gm, MissionManager mm)
+        public static void CreateRuntimeUI(GameObject gm, MissionManager mm,
+            string objectiveMsg = "MISSION 2: Eliminate Viktor. Adapt to enemy defenses.")
         {
             GameObject canvasGO = new GameObject("UICanvas");
             Canvas canvas = canvasGO.AddComponent<Canvas>();
@@ -1396,7 +1397,7 @@ namespace AdaptiveWorld2D.Director
             GameObject objGO = new GameObject("ObjectiveText");
             objGO.transform.SetParent(canvasGO.transform, false);
             Text objText = objGO.AddComponent<Text>();
-            objText.text = "MISSION 2: Eliminate Viktor. Adapt to enemy defenses.";
+            objText.text = objectiveMsg;
             objText.font = font;
             objText.fontSize = 16;
             objText.color = Color.white;

@@ -27,7 +27,6 @@ namespace AdaptiveWorld2D.Player
         private SpriteRenderer _spriteRenderer;
 
         // Telemetry tracking variables
-        private float _navTimer = 0f;
         private float _intervalTimer = 0f;
         private Vector2 _lastPosition;
         private float _accumulatedDistance = 0f;
@@ -65,7 +64,7 @@ namespace AdaptiveWorld2D.Player
                 h = Input.GetAxisRaw("Horizontal");
                 v = Input.GetAxisRaw("Vertical");
             }
-            catch { }
+            catch (System.Exception) { /* Axis may not be configured in Input Manager */ }
 
             // Direct key fallback in case Input Manager axes are not configured
             if (h == 0f && v == 0f)
@@ -77,7 +76,7 @@ namespace AdaptiveWorld2D.Player
                     if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) h -= 1f;
                     if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) h += 1f;
                 }
-                catch { }
+                catch (System.Exception) { }
             }
 
 #if ENABLE_INPUT_SYSTEM
@@ -143,6 +142,7 @@ namespace AdaptiveWorld2D.Player
             _lastPosition = curPos;
         }
 
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
         private void OnGUI()
         {
             GUIStyle boxStyle = new GUIStyle(GUI.skin.box);
@@ -161,11 +161,11 @@ namespace AdaptiveWorld2D.Player
 
             GUI.Box(new Rect(10, 10, 260, 105), text, boxStyle);
         }
+#endif
 
         private void TrackTelemetryInterval()
         {
             _intervalTimer += Time.deltaTime;
-            _navTimer += Time.deltaTime;
 
             // Detect surface underneath
             DetectSurface();

@@ -26,14 +26,15 @@ namespace AdaptiveWorld2D.Mission
 
         private void Awake()
         {
+            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
             Instance = this;
             // Force mission number based on which scene we're in — overrides any Inspector value
-            currentMission = IsMap2Scene() ? 2 : 1;
+            currentMission = WorldManifestApplier.IsMap2Scene() ? 2 : 1;
         }
 
         private void Start()
         {
-            bool isMap2 = IsMap2Scene();
+            bool isMap2 = WorldManifestApplier.IsMap2Scene();
 
             if (playerCombat == null)
 #if UNITY_2023_1_OR_NEWER
@@ -119,11 +120,6 @@ namespace AdaptiveWorld2D.Mission
                 AdaptiveDirectorClient.Instance.OnManifestReceived -= OnDirectorManifestReceived;
             }
         }
-
-        /// <summary>Returns true when the active scene is the Map 2 assassination mission.</summary>
-        private static bool IsMap2Scene() =>
-            UnityEngine.SceneManagement.SceneManager.GetActiveScene().name
-                .IndexOf("Map2", StringComparison.OrdinalIgnoreCase) >= 0;
 
         public void SetObjective(string text)
         {

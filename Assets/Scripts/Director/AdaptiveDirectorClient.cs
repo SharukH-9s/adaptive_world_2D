@@ -66,20 +66,9 @@ namespace AdaptiveWorld2D.Director
         public bool armored;
     }
 
-    /// <summary>Reserved for future direct spatial-stat binding of the boss to the room graph.
-    /// Mirrors backend/target_solver.py's TargetBossConfig. NOT currently populated in the live
-    /// JSON payload -- boss stats remain in TargetManifest, referenced spatially only via
-    /// RoomGraphManifest.target_sector.</summary>
-    [Serializable]
-    public class TargetBossConfig
-    {
-        public string name;
-        public string sector_id;
-        public string armor;
-        public int health;
-        public string movement;
-        public bool is_indoors;
-    }
+    // TargetBossConfig was removed — it mirrored backend/target_solver.py's TargetBossConfig but
+    // was never populated in the live JSON payload. Boss stats live in TargetManifest; spatial
+    // binding is handled via RoomGraphManifest.target_sector. Re-add if the backend starts sending it.
 
     /// <summary>One cell of the 3x3 tactical sector grid (60x45 canvas, cells at
     /// X = -20/0/+20, Y = +15/0/-15). Mirrors backend/target_solver.py's SectorConfig.</summary>
@@ -264,6 +253,7 @@ namespace AdaptiveWorld2D.Director
         {
             if (Instance != null && Instance != this) { Destroy(gameObject); return; }
             Instance = this;
+            DontDestroyOnLoad(gameObject); // Keep singleton + latestManifest alive across scene loads
         }
 
         private void Update()

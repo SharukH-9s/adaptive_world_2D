@@ -66,19 +66,6 @@ public static class AdaptiveSceneBuilder
         }
     }
 
-    private static Sprite _cachedWhiteSprite;
-    private static Sprite GetWhiteSprite()
-    {
-        if (_cachedWhiteSprite == null)
-        {
-            Texture2D tex = new Texture2D(2, 2);
-            tex.SetPixels(new Color[] { Color.white, Color.white, Color.white, Color.white });
-            tex.Apply();
-            _cachedWhiteSprite = Sprite.Create(tex, new Rect(0, 0, 2, 2), new Vector2(0.5f, 0.5f), 1f, 0, SpriteMeshType.FullRect, Vector4.zero);
-            _cachedWhiteSprite.name = "ProceduralWhiteSprite";
-        }
-        return _cachedWhiteSprite;
-    }
 
     [MenuItem("AdaptiveWorld/Ensure Sprites Imported", priority = 99)]
     public static void EnsureAssetsImportedAsSprites()
@@ -419,7 +406,7 @@ public static class AdaptiveSceneBuilder
         SafeSetTag(b, "Building");
 
         SpriteRenderer sr = b.AddComponent<SpriteRenderer>();
-        sr.sprite    = GetWhiteSprite(); // solid block; in Unity assign wall tiles
+        sr.sprite    = WorldManifestApplier.GetUniversalWhiteSprite(); // solid block; in Unity assign wall tiles
         sr.drawMode  = SpriteDrawMode.Sliced;
         sr.size      = size;
         sr.color     = color;
@@ -493,7 +480,7 @@ public static class AdaptiveSceneBuilder
         bc.carId            = carId;
         bc.carType          = carType;
         bc.cleanCarSprite   = cleanSprite;
-        bc.burningCarSprite = cleanSprite;
+        bc.burningCarSprite = burntSprite;
         bc.wreckedCarSprite = burntSprite;
 
         Debug.Log($"[SceneBuilder] Car '{name}' at {pos}");
@@ -985,8 +972,10 @@ public static class AdaptiveSceneBuilder
         BuildGuardInfrastructure(applier);
         BuildUI(gm, "MISSION 2: Eliminate the target. Route determined by the AI Director.");
 
-        // Build default balanced sector architecture for editor preview
-        SectorRuntimeBuilder.Build(ProceduralSectorBuilder.TestManifests.Balanced());
+        // Build default balanced sector architecture for editor preview.
+        // Use ProceduralSectorBuilder.Build (not SectorRuntimeBuilder.Build directly) so the
+        // scene is consistently marked dirty and saved through the same wrapper as all other paths.
+        ProceduralSectorBuilder.Build(ProceduralSectorBuilder.TestManifests.Balanced());
 
         // Auto-save to disk so Map2.unity is permanently serialized
         UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(
@@ -1005,24 +994,6 @@ public static class AdaptiveSceneBuilder
             "Scene file saved automatically.", "Got it!");
     }
 
-    private static void BuildCityEnvironment_Legacy()
-    {
-        if (GameObject.Find("CityRoad_Main") != null) return;
-
-        GameObject road = new GameObject("CityRoad_Main");
-        road.transform.position = new Vector3(9f, 0f, 0f);
-        road.layer = LAYER_ROAD;
-
-        SpriteRenderer sr = road.AddComponent<SpriteRenderer>();
-        sr.sprite    = LoadSprite("kenney_vehicles/PNG/Tiles/Asphalt road/road_asphalt01.png");
-        sr.drawMode  = SpriteDrawMode.Tiled;
-        sr.size      = new Vector2(38f, 6.5f);
-        sr.sortingOrder = -10;
-
-        BoxCollider2D col = road.AddComponent<BoxCollider2D>();
-        col.size      = new Vector2(38f, 6.5f);
-        col.isTrigger = true;
-    }
 
     // ─────────────────────────────────────────────────────────────
     //  SHARED: BUILD PLAYER
@@ -1313,63 +1284,8 @@ public static class AdaptiveSceneBuilder
     private static void BuildUI(GameObject gm, string objectiveMsg)
     {
         if (GameObject.Find("UICanvas") != null) return;
-
-        GameObject canvasGO = new GameObject("UICanvas");
-        Canvas canvas = canvasGO.AddComponent<Canvas>();
-        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvasGO.AddComponent<CanvasScaler>();
-        canvasGO.AddComponent<UnityEngine.UI.GraphicRaycaster>();
-
-        // Objective text — bottom bar
-        GameObject objGO = new GameObject("ObjectiveText");
-        objGO.transform.SetParent(canvasGO.transform, false);
-        Text objText = objGO.AddComponent<Text>();
-        objText.text      = objectiveMsg;
-        objText.font      = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        objText.fontSize  = 16;
-        objText.color     = Color.white;
-        objText.alignment = TextAnchor.LowerCenter;
-        RectTransform objRT = objGO.GetComponent<RectTransform>();
-        objRT.anchorMin = new Vector2(0f, 0f);
-        objRT.anchorMax = new Vector2(1f, 0.1f);
-        objRT.offsetMin = new Vector2(10f, 10f);
-        objRT.offsetMax = new Vector2(-10f, 0f);
-
-        // Briefing panel — shown at mission transitions
-        GameObject panelGO = new GameObject("BriefingPanel");
-        panelGO.transform.SetParent(canvasGO.transform, false);
-        UnityEngine.UI.Image panelImg = panelGO.AddComponent<UnityEngine.UI.Image>();
-        panelImg.color = new Color(0f, 0f, 0f, 0.78f);
-        RectTransform panelRT = panelGO.GetComponent<RectTransform>();
-        panelRT.anchorMin = new Vector2(0.1f, 0.4f);
-        panelRT.anchorMax = new Vector2(0.9f, 0.9f);
-        panelRT.offsetMin = Vector2.zero;
-        panelRT.offsetMax = Vector2.zero;
-
-        GameObject debriefGO = new GameObject("DebriefingText");
-        debriefGO.transform.SetParent(panelGO.transform, false);
-        Text debriefText = debriefGO.AddComponent<Text>();
-        debriefText.text      = "";
-        debriefText.font      = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-        debriefText.fontSize  = 14;
-        debriefText.color     = Color.white;
-        debriefText.alignment = TextAnchor.MiddleCenter;
-        RectTransform debriefRT = debriefGO.GetComponent<RectTransform>();
-        debriefRT.anchorMin = Vector2.zero;
-        debriefRT.anchorMax = Vector2.one;
-        debriefRT.offsetMin = new Vector2(20f, 20f);
-        debriefRT.offsetMax = new Vector2(-20f, -20f);
-
-        panelGO.SetActive(false);
-
         MissionManager mm = gm.GetComponent<MissionManager>();
-        if (mm != null)
-        {
-            mm.objectiveText  = objText;
-            mm.debriefingText = debriefText;
-            mm.briefingPanel  = panelGO;
-        }
-
+        WorldManifestApplier.CreateRuntimeUI(gm, mm, objectiveMsg);
         Debug.Log("[SceneBuilder] UI Canvas created.");
     }
 }

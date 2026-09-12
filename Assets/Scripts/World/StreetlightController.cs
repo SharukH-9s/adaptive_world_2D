@@ -68,6 +68,14 @@ namespace AdaptiveWorld2D.World
 
             if (_sr != null)
                 _sr.color = _baseColor;
+
+            if (_light2DComp != null)
+            {
+                var colorProp = _light2DComp.GetType().GetProperty("color");
+                colorProp?.SetValue(_light2DComp, _baseColor);
+                var radiusProp = _light2DComp.GetType().GetProperty("pointLightOuterRadius");
+                radiusProp?.SetValue(_light2DComp, lightRadius);
+            }
         }
 
         private void TryFindLight2D()
@@ -113,7 +121,7 @@ namespace AdaptiveWorld2D.World
             _intensityProp?.SetValue(_light2DComp, _currentIntensity);
 
             // Modulate SpriteRenderer alpha slightly to reflect the light flicker
-            if (_sr != null)
+            if (_sr != null && baseIntensity > 0.001f)
             {
                 float alpha = Mathf.Clamp01(_currentIntensity / baseIntensity);
                 _sr.color = new Color(_baseColor.r, _baseColor.g, _baseColor.b, alpha);
@@ -158,6 +166,10 @@ namespace AdaptiveWorld2D.World
             }
 
             _intensityProp?.SetValue(_light2DComp, baseIntensity);
+            if (_sr != null && baseIntensity > 0.001f)
+            {
+                _sr.color = new Color(_baseColor.r, _baseColor.g, _baseColor.b, Mathf.Clamp01(baseIntensity / 1.5f));
+            }
         }
     }
 }
