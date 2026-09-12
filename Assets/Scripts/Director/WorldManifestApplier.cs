@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -22,6 +23,8 @@ namespace AdaptiveWorld2D.Director
         public List<Transform> guardSpawnPoints = new List<Transform>();
         private List<GameObject> _activeGuards = new List<GameObject>();
         private GameObject _extractionZone;     // Phase 4: extraction trigger
+        private ulong _bootstrappedSceneHandle;
+        private string _appliedManifestKey;
 
         [Header("Obstacles & Roadblocks")]
         public List<NamedBarricade> routeBarricades = new List<NamedBarricade>();
@@ -48,13 +51,17 @@ namespace AdaptiveWorld2D.Director
 
         private void Start()
         {
-            if (!IsMap2Scene())
-            {
-                // WorldManifestApplier is strictly for Map 2 (Mission 2).
-                // Do not spawn guards or bosses in Map 1!
-                return;
-            }
+            BootstrapForMap2();
+        }
 
+        public void BootstrapForMap2()
+        {
+            var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            ulong sceneHandle = activeScene.handle.GetRawData();
+            if (!IsMap2Scene() || _bootstrappedSceneHandle == sceneHandle)
+                return;
+
+            _bootstrappedSceneHandle = sceneHandle;
             if (AdaptiveDirectorClient.Instance != null)
             {
                 AdaptiveDirectorClient.Instance.OnManifestReceived += ApplyManifest;
@@ -88,13 +95,26 @@ namespace AdaptiveWorld2D.Director
                 {
                     Debug.Log("[WorldManifestApplier] No cached manifest — requesting fresh manifest for Map2 from Director...");
                     // OnManifestReceived event will automatically trigger ApplyManifest
-                    AdaptiveDirectorClient.Instance.RequestMission2Manifest(42, null);
+                    AdaptiveDirectorClient.Instance.RequestMission2Manifest(GetMissionSeed(), null);
+                    StartCoroutine(ApplyFallbackIfManifestMissing(5f));
                 }
                 else
                 {
                     Debug.LogWarning("[WorldManifestApplier] No Director Client available — applying default fallback target & guards.");
                     ApplyDefaultFallback();
                 }
+            }
+
+        }
+
+        private IEnumerator ApplyFallbackIfManifestMissing(float timeout)
+        {
+            yield return new WaitForSeconds(timeout);
+
+            if (IsMap2Scene() && AdaptiveDirectorClient.latestManifest == null)
+            {
+                Debug.LogWarning("[WorldManifestApplier] Director manifest did not arrive in time; applying the default Map 2 fallback.");
+                ApplyDefaultFallback();
             }
         }
 
@@ -141,6 +161,12 @@ namespace AdaptiveWorld2D.Director
             {
                 AdaptiveDirectorClient.Instance.OnManifestReceived -= ApplyManifest;
             }
+
+        }
+
+        private static int GetMissionSeed()
+        {
+            return Mathf.Abs(DateTime.UtcNow.Ticks.GetHashCode());
         }
 
         /// <summary>Returns true when the active scene is the Map 2 assassination mission.</summary>
@@ -153,6 +179,14 @@ namespace AdaptiveWorld2D.Director
             if (manifest == null) return;
 
             if (!IsMap2Scene()) return; // Safety guard: only apply manifest on Map 2
+
+            string manifestKey = BuildManifestKey(manifest);
+            if (_appliedManifestKey == manifestKey)
+            {
+                Debug.Log($"[WorldManifestApplier] Ignoring duplicate manifest application ({manifestKey}).");
+                return;
+            }
+            _appliedManifestKey = manifestKey;
 
             Debug.Log($"[WorldManifestApplier] Applying Mission {manifest.mission_id} ({manifest.player_archetype}) to scene!");
 
@@ -180,6 +214,19 @@ namespace AdaptiveWorld2D.Director
                     ScaleGuardVisionForWeather(manifest.environment.visibility);
             }
             catch (Exception ex) { Debug.LogException(ex); }
+        }
+
+        private static string BuildManifestKey(MissionManifest manifest)
+        {
+            RoomGraphManifest rg = manifest.room_graph;
+            return string.Join("|",
+                manifest.mission_id,
+                manifest.player_archetype ?? string.Empty,
+                rg != null ? rg.player_spawn_sector : string.Empty,
+                rg != null ? rg.target_sector : string.Empty,
+                rg != null ? rg.extraction_sector : string.Empty,
+                manifest.target != null ? manifest.target.location_id : string.Empty,
+                manifest.guards != null ? manifest.guards.count.ToString() : "0");
         }
 
         /// <summary>
@@ -238,6 +285,11 @@ namespace AdaptiveWorld2D.Director
             // Spawn Viktor
             if (targetPrefab == null)
                 targetPrefab = Resources.Load<GameObject>("ViktorPrefab");
+#if UNITY_EDITOR
+            if (targetPrefab == null)
+                targetPrefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+                    "Assets/Prefabs/ViktorPrefab.prefab");
+#endif
 
             if (currentTargetInstance == null)
             {
@@ -248,12 +300,13 @@ namespace AdaptiveWorld2D.Director
             else
             {
                 currentTargetInstance.transform.position = spawnPos;
-                currentTargetInstance.SetActive(true);
             }
 
             // Configure Viktor's combat stats
             if (currentTargetInstance != null)
             {
+                currentTargetInstance.SetActive(true);
+                ConfigureEnemyVisual(currentTargetInstance, 30);
                 var bossPatrol = currentTargetInstance.GetComponent<AdaptiveWorld2D.AI.EnemyPatrol>();
                 if (bossPatrol != null)
                 {
@@ -317,6 +370,8 @@ namespace AdaptiveWorld2D.Director
                 if (bodyguard == null) continue;
 
                 bodyguard.name = $"Viktor_Bodyguard_{i:D2}";
+                bodyguard.SetActive(true);
+                ConfigureEnemyVisual(bodyguard, 26);
                 _activeGuards.Add(bodyguard);
 
                 // Bodyguards are tougher and more alert than regular patrol guards
@@ -376,8 +431,13 @@ namespace AdaptiveWorld2D.Director
             if (guardPrefab == null)
             {
                 guardPrefab = Resources.Load<GameObject>("GuardPrefab");
+#if UNITY_EDITOR
                 if (guardPrefab == null)
-                    Debug.LogWarning("[WorldManifestApplier] guardPrefab missing — using procedural fallback.");
+                    guardPrefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+                        "Assets/Prefabs/GuardPrefab.prefab");
+#endif
+                if (guardPrefab == null)
+                    Debug.Log("[WorldManifestApplier] Guard prefab unavailable; using procedural runtime guard.");
             }
 
             // ─────────────────────────────────────────────────────────
@@ -477,6 +537,8 @@ namespace AdaptiveWorld2D.Director
                 : CreateProceduralGuard(pos, index);
 
             if (guardObj == null) return;
+            guardObj.SetActive(true);
+            ConfigureEnemyVisual(guardObj, 25);
             _activeGuards.Add(guardObj);
 
             // Apply global guard manifest stats
@@ -520,6 +582,24 @@ namespace AdaptiveWorld2D.Director
             var patrol = guardObj.GetComponent<AdaptiveWorld2D.AI.EnemyPatrol>();
             if (patrol != null && g.armored)
                 patrol.damageResistance = 0.5f;
+        }
+
+        private static void ConfigureEnemyVisual(GameObject enemy, int sortingOrder)
+        {
+            if (enemy == null) return;
+
+            int enemyLayer = LayerMask.NameToLayer("Enemy");
+            if (enemyLayer >= 0)
+                enemy.layer = enemyLayer;
+
+            SpriteRenderer renderer = enemy.GetComponent<SpriteRenderer>();
+            if (renderer != null)
+            {
+                renderer.enabled = true;
+                renderer.sortingLayerName = "Characters";
+                renderer.sortingOrder = sortingOrder;
+                renderer.color = new Color(renderer.color.r, renderer.color.g, renderer.color.b, 1f);
+            }
         }
 
         /// <summary>Builds a fully functional guard at runtime — no prefab needed.</summary>
@@ -796,7 +876,11 @@ namespace AdaptiveWorld2D.Director
                     shape.scale = new Vector3(26f, 16f, 1f);
 
                     var rend = rainGO.GetComponent<ParticleSystemRenderer>();
-                    rend.sortingOrder = 25;
+                    rend.renderMode = ParticleSystemRenderMode.Stretch;
+                    rend.lengthScale = 3.5f;
+                    rend.velocityScale = 0.02f;
+                    rend.sortingLayerName = "Atmosphere";
+                    rend.sortingOrder = 60;
                 }
             }
 
@@ -838,7 +922,8 @@ namespace AdaptiveWorld2D.Director
                     shape.scale = new Vector3(25f, 18f, 1f);
 
                     var rend = fogGO.GetComponent<ParticleSystemRenderer>();
-                    rend.sortingOrder = 24;
+                    rend.sortingLayerName = "Atmosphere";
+                    rend.sortingOrder = 55;
                 }
             }
 
@@ -1229,7 +1314,13 @@ namespace AdaptiveWorld2D.Director
                 Texture2D tex = new Texture2D(2, 2);
                 tex.SetPixels(new Color[] { Color.white, Color.white, Color.white, Color.white });
                 tex.Apply();
-                _universalWhiteSprite = Sprite.Create(tex, new Rect(0, 0, 2, 2), new Vector2(0.5f, 0.5f), 1f);
+                _universalWhiteSprite = Sprite.Create(
+                    tex,
+                    new Rect(0, 0, 2, 2),
+                    new Vector2(0.5f, 0.5f),
+                    1f,
+                    0,
+                    SpriteMeshType.FullRect);
             }
             return _universalWhiteSprite;
         }
@@ -1312,66 +1403,6 @@ namespace AdaptiveWorld2D.Director
 
             Debug.Log($"[WorldManifestApplier] Procedural Player created and wired at {pos}.");
             return player;
-        }
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-        private static void RegisterSceneLoadHook()
-        {
-            UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoadedStatic;
-            UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoadedStatic;
-
-            CheckMap2Bootstrapping(UnityEngine.SceneManagement.SceneManager.GetActiveScene());
-        }
-
-        private static void OnSceneLoadedStatic(UnityEngine.SceneManagement.Scene scene, UnityEngine.SceneManagement.LoadSceneMode mode)
-        {
-            CheckMap2Bootstrapping(scene);
-        }
-
-        private static void CheckMap2Bootstrapping(UnityEngine.SceneManagement.Scene scene)
-        {
-            if (!Application.isPlaying) return;
-            if (string.IsNullOrEmpty(scene.name) || scene.name.IndexOf("Map2", StringComparison.OrdinalIgnoreCase) < 0) return;
-
-#if UNITY_2023_1_OR_NEWER
-            var existingApplier = UnityEngine.Object.FindAnyObjectByType<WorldManifestApplier>();
-#else
-            var existingApplier = UnityEngine.Object.FindObjectOfType<WorldManifestApplier>();
-#endif
-            if (existingApplier != null) return; // Scene already has GameManager & WorldManifestApplier
-
-            Debug.Log("[WorldManifestApplier] Map 2 loaded without GameManager/WorldManifestApplier — auto-bootstrapping at runtime!");
-
-            // 1. Create GameManager
-            GameObject gm = new GameObject("GameManager");
-            var dirClient = gm.AddComponent<AdaptiveDirectorClient>();
-            dirClient.apiBaseUrl = "http://127.0.0.1:8001";
-            dirClient.flushInterval = 2.0f;
-            dirClient.autoFlush = true;
-
-            gm.AddComponent<TelemetryReporter>();
-            var applier = gm.AddComponent<WorldManifestApplier>();
-            var mm = gm.AddComponent<MissionManager>();
-
-            // 2. Camera setup
-            Camera cam = Camera.main;
-            if (cam != null)
-            {
-                var camFollow = cam.GetComponent<CameraFollow2D>() ?? cam.gameObject.AddComponent<CameraFollow2D>();
-                camFollow.smoothSpeed = 8f;
-                camFollow.cameraZ = -10f;
-            }
-
-            // 3. UI Setup if missing
-#if UNITY_2023_1_OR_NEWER
-            Canvas existingCanvas = UnityEngine.Object.FindAnyObjectByType<Canvas>();
-#else
-            Canvas existingCanvas = UnityEngine.Object.FindObjectOfType<Canvas>();
-#endif
-            if (existingCanvas == null)
-            {
-                CreateRuntimeUI(gm, mm);
-            }
         }
 
         private static Font GetDefaultFont()

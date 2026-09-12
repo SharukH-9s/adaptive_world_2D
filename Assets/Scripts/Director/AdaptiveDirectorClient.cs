@@ -253,7 +253,47 @@ namespace AdaptiveWorld2D.Director
         {
             if (Instance != null && Instance != this) { Destroy(gameObject); return; }
             Instance = this;
+            UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
             DontDestroyOnLoad(gameObject); // Keep singleton + latestManifest alive across scene loads
+        }
+
+        private void OnDestroy()
+        {
+            UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
+            if (Instance == this)
+                Instance = null;
+        }
+
+        private static void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene,
+                                          UnityEngine.SceneManagement.LoadSceneMode mode)
+        {
+            bool isMap2 = scene.name.IndexOf("Map2", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (isMap2)
+            {
+#if UNITY_2023_1_OR_NEWER
+                WorldManifestApplier applier = UnityEngine.Object.FindAnyObjectByType<WorldManifestApplier>();
+#else
+                WorldManifestApplier applier = UnityEngine.Object.FindObjectOfType<WorldManifestApplier>();
+#endif
+                if (applier != null)
+                    applier.BootstrapForMap2();
+                else
+                    Debug.LogWarning("[AdaptiveDirector] Map2 loaded but no WorldManifestApplier was found.");
+                return;
+            }
+
+            latestManifest = null;
+            try
+            {
+                if (System.IO.File.Exists(CACHE_PATH))
+                    System.IO.File.Delete(CACHE_PATH);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[AdaptiveDirector] Could not clear manifest cache on fresh Map1 load: {ex.Message}");
+            }
+
+            Debug.Log("[AdaptiveDirector] Fresh non-Map2 scene loaded; cleared previous Map2 manifest.");
         }
 
         private void Update()

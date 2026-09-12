@@ -38,6 +38,11 @@ namespace AdaptiveWorld2D.Player
         {
             _rb = GetComponent<Rigidbody2D>();
             _spriteRenderer = GetComponent<SpriteRenderer>();
+            if (_spriteRenderer != null)
+            {
+                _spriteRenderer.sortingLayerName = "Characters";
+                _spriteRenderer.sortingOrder = 25;
+            }
             _rb.gravityScale = 0f;
             _rb.freezeRotation = true;
             _lastPosition = transform.position;
@@ -79,29 +84,8 @@ namespace AdaptiveWorld2D.Player
                 catch (System.Exception) { }
             }
 
-#if ENABLE_INPUT_SYSTEM
-            if (h == 0f && v == 0f)
-            {
-                var kb = UnityEngine.InputSystem.Keyboard.current;
-                if (kb != null)
-                {
-                    if (kb.wKey.isPressed || kb.upArrowKey.isPressed) v += 1f;
-                    if (kb.sKey.isPressed || kb.downArrowKey.isPressed) v -= 1f;
-                    if (kb.aKey.isPressed || kb.leftArrowKey.isPressed) h -= 1f;
-                    if (kb.dKey.isPressed || kb.rightArrowKey.isPressed) h += 1f;
-                }
-            }
-#endif
-
             bool shift = false;
-            try { shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift); } catch { }
-#if ENABLE_INPUT_SYSTEM
-            if (!shift)
-            {
-                var kb = UnityEngine.InputSystem.Keyboard.current;
-                if (kb != null) shift = kb.leftShiftKey.isPressed || kb.rightShiftKey.isPressed;
-            }
-#endif
+            try { shift = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift); } catch (System.Exception) { }
             isSprinting = shift && !isDriving;
 
             _moveInput = new Vector2(h, v).normalized;
@@ -142,7 +126,7 @@ namespace AdaptiveWorld2D.Player
             _lastPosition = curPos;
         }
 
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
+#if UNITY_EDITOR || DEBUG
         private void OnGUI()
         {
             GUIStyle boxStyle = new GUIStyle(GUI.skin.box);

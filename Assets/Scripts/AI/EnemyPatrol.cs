@@ -48,6 +48,13 @@ namespace AdaptiveWorld2D.AI
             _rb.gravityScale = 0f;
             _rb.freezeRotation = true;
 
+            var sr = GetComponent<SpriteRenderer>();
+            if (sr != null)
+            {
+                sr.sortingLayerName = "Characters";
+                sr.sortingOrder = 25;
+            }
+
             // Default avoidance layer — walls and interactables
             if (obstacleAvoidanceLayer == 0)
                 obstacleAvoidanceLayer = LayerMask.GetMask("Building", "Interactable");
@@ -176,7 +183,7 @@ namespace AdaptiveWorld2D.AI
             }
         }
 
-        public bool TakeDamage(int rawDamage)
+        public bool TakeDamage(int rawDamage, Vector2 hitDirection = default)
         {
             if (isDead) return true;
 
@@ -193,7 +200,13 @@ namespace AdaptiveWorld2D.AI
                 Die();
                 return true; // lethal
             }
-            return false;
+            else
+            {
+                // Non-lethal hit spawns directional impact blood splatter (§5.1)
+                Vector2 dir = hitDirection != default ? hitDirection : (Vector2)(-transform.up);
+                AdaptiveWorld2D.World.DecalPool.Instance?.SpawnBlood(transform.position, dir);
+                return false;
+            }
         }
 
         /// <summary>External alert entry point used by AlertSystem.BroadcastSectorAlert().</summary>
@@ -214,7 +227,14 @@ namespace AdaptiveWorld2D.AI
             // Rotate onto side or play death animation
             transform.rotation = Quaternion.Euler(0f, 0f, 90f);
             var sr = GetComponent<SpriteRenderer>();
-            if (sr != null) sr.color = new Color(0.6f, 0.6f, 0.6f, 0.8f);
+            if (sr != null)
+            {
+                sr.color = new Color(0.6f, 0.6f, 0.6f, 0.8f);
+                sr.sortingLayerName = "Decals";
+                sr.sortingOrder = -1;
+            }
+
+            AdaptiveWorld2D.World.DecalPool.Instance?.SpawnBlood(transform.position, Vector2.down);
 
             Debug.Log($"[EnemyPatrol] {(isTargetBoss ? "TARGET BOSS" : "Guard")} eliminated!");
 

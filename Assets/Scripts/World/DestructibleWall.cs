@@ -59,7 +59,9 @@ namespace AdaptiveWorld2D.World
             if (rubbleSprite != null && _sr != null)
             {
                 _sr.sprite = rubbleSprite;
+                _sr.sortingLayerName = "Decals";
                 _sr.sortingOrder = -1; // Flatten behind player
+                DecalPool.Instance?.RegisterDecal(gameObject);
             }
             else if (_sr != null)
             {
@@ -69,6 +71,12 @@ namespace AdaptiveWorld2D.World
             if (debrisParticles != null)
             {
                 debrisParticles.Play();
+            }
+
+            // Trigger dynamic camera impulse feedback (§4.2)
+            if (CameraFollow2D.Instance != null)
+            {
+                CameraFollow2D.Instance.AddImpulse(0.35f);
             }
 
             Debug.Log($"[DestructibleWall] Wall {wallId} destroyed!");

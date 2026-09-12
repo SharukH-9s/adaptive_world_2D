@@ -82,12 +82,14 @@ namespace AdaptiveWorld2D.Player
             Vector2 endPoint = hit.collider != null ? hit.point : (origin + dir * gunRange);
             StartCoroutine(DrawBulletTracer(origin, endPoint));
             StartCoroutine(DrawMuzzleFlash(origin));
+            AdaptiveWorld2D.World.DecalPool.Instance?.SpawnCasing(origin, -dir);
+
             if (hit.collider != null)
             {
                 var enemy = hit.collider.GetComponent<EnemyPatrol>();
                 if (enemy != null)
                 {
-                    bool wasLethal = enemy.TakeDamage(gunDamage);
+                    bool wasLethal = enemy.TakeDamage(gunDamage, dir);
                     float dist = Vector2.Distance(origin, hit.point);
 
                     if (TelemetryReporter.Instance != null)
@@ -122,7 +124,8 @@ namespace AdaptiveWorld2D.Player
                 bool isStealth = dot < -0.2f && !enemy.isAlerted;
 
                 int damage = isStealth ? 999 : meleeDamage;
-                bool wasLethal = enemy.TakeDamage(damage);
+                Vector2 attackDir = (enemy.transform.position - (Vector3)origin).normalized;
+                bool wasLethal = enemy.TakeDamage(damage, attackDir);
                 float dist = Vector2.Distance(origin, enemy.transform.position);
 
                 string style = isStealth ? "STEALTH" : "DIRECT_ASSAULT";
@@ -176,6 +179,7 @@ namespace AdaptiveWorld2D.Player
             lr.material = new Material(Shader.Find("Sprites/Default"));
             lr.startColor = new Color(1f, 0.9f, 0.3f, 0.9f);
             lr.endColor = new Color(1f, 0.4f, 0.1f, 0.4f);
+            lr.sortingLayerName = "Projectiles";
             lr.sortingOrder = 10;
 
             yield return new WaitForSeconds(0.06f);
@@ -211,6 +215,7 @@ namespace AdaptiveWorld2D.Player
             SpriteRenderer sr = flashObj.AddComponent<SpriteRenderer>();
             sr.sprite = WorldManifestApplier.GetUniversalWhiteSprite();
             sr.color = new Color(1f, 0.9f, 0.5f, 0.75f);
+            sr.sortingLayerName = "Projectiles";
             sr.sortingOrder = 15;
             flashObj.transform.localScale = new Vector3(0.4f, 0.4f, 1f);
 

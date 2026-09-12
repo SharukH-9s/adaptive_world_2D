@@ -157,7 +157,7 @@ namespace AdaptiveWorld2D.World
         private static void BuildWarehouseInterior(Transform parent, Vector3 center)
         {
             CreateGroundQuad(parent, "Ground_WarehouseFloor", center, new Vector2(CELL_WIDTH, CELL_HEIGHT), LAYER_BUILDING,
-                new Color(0.30f, 0.28f, 0.25f));
+                new Color(0.30f, 0.28f, 0.25f), "WAREHOUSE_INTERIOR");
 
             float w = 14f, h = 10f, t = 0.6f;
             Color wallColor = new Color(0.45f, 0.42f, 0.38f);
@@ -181,7 +181,7 @@ namespace AdaptiveWorld2D.World
         private static void BuildFortifiedPlaza(Transform parent, Vector3 center)
         {
             CreateGroundQuad(parent, "Ground_Plaza", center, new Vector2(CELL_WIDTH, CELL_HEIGHT), LAYER_ROAD,
-                new Color(0.42f, 0.40f, 0.38f));
+                new Color(0.42f, 0.40f, 0.38f), "FORTIFIED_PLAZA");
 
             Vector3[] offsets = { new Vector3(-5f, 4f, 0f), new Vector3(5f, 4f, 0f), new Vector3(-5f, -4f, 0f), new Vector3(5f, -4f, 0f) };
             for (int i = 0; i < offsets.Length; i++)
@@ -192,8 +192,7 @@ namespace AdaptiveWorld2D.World
             marker.transform.position = center;
             SpriteRenderer sr = marker.AddComponent<SpriteRenderer>();
             sr.sprite = WorldManifestApplier.GetUniversalWhiteSprite();
-            sr.drawMode = SpriteDrawMode.Sliced;
-            sr.size = new Vector2(3f, 3f);
+            marker.transform.localScale = new Vector3(3f, 3f, 1f);
             sr.color = new Color(0.75f, 0.7f, 0.3f, 0.5f);
             sr.sortingOrder = -5;
 
@@ -207,7 +206,7 @@ namespace AdaptiveWorld2D.World
         private static void BuildSlumAlleyways(Transform parent, Vector3 center)
         {
             CreateGroundQuad(parent, "Ground_Alley", center, new Vector2(CELL_WIDTH, CELL_HEIGHT), LAYER_ALLEY,
-                new Color(0.22f, 0.22f, 0.24f));
+                new Color(0.22f, 0.22f, 0.24f), "SLUM_ALLEYWAYS");
 
             Color facadeColor = new Color(0.29f, 0.27f, 0.26f);
             CreateSolidWall(parent, "TenementFacade_NW", center + new Vector3(-6f, 4f, 0f), new Vector2(6f, 4f), LAYER_BUILDING, facadeColor);
@@ -221,11 +220,11 @@ namespace AdaptiveWorld2D.World
         private static void BuildUrbanHighway(Transform parent, Vector3 center)
         {
             CreateGroundQuad(parent, "Ground_Highway", center, new Vector2(CELL_WIDTH, CELL_HEIGHT - 3f), LAYER_ROAD,
-                new Color(0.16f, 0.16f, 0.18f));
+                new Color(0.16f, 0.16f, 0.18f), "URBAN_HIGHWAY");
 
             Color sidewalkColor = new Color(0.5f, 0.5f, 0.48f);
-            CreateGroundQuad(parent, "Sidewalk_N", center + new Vector3(0f, CELL_HEIGHT / 2f - 1f, 0f), new Vector2(CELL_WIDTH, 2f), LAYER_ROAD, sidewalkColor);
-            CreateGroundQuad(parent, "Sidewalk_S", center + new Vector3(0f, -(CELL_HEIGHT / 2f - 1f), 0f), new Vector2(CELL_WIDTH, 2f), LAYER_ROAD, sidewalkColor);
+            CreateGroundQuad(parent, "Sidewalk_N", center + new Vector3(0f, CELL_HEIGHT / 2f - 1f, 0f), new Vector2(CELL_WIDTH, 2f), LAYER_ROAD, sidewalkColor, "OPEN_STREET");
+            CreateGroundQuad(parent, "Sidewalk_S", center + new Vector3(0f, -(CELL_HEIGHT / 2f - 1f), 0f), new Vector2(CELL_WIDTH, 2f), LAYER_ROAD, sidewalkColor, "OPEN_STREET");
 
             CreateStreetlight(parent, "Streetlight_W", center + new Vector3(-8f, CELL_HEIGHT / 2f - 1.6f, 0f), "URBAN_HIGHWAY");
             CreateStreetlight(parent, "Streetlight_C", center + new Vector3(0f, CELL_HEIGHT / 2f - 1.6f, 0f), "URBAN_HIGHWAY");
@@ -235,7 +234,7 @@ namespace AdaptiveWorld2D.World
         private static void BuildIndustrialDepot(Transform parent, Vector3 center)
         {
             CreateGroundQuad(parent, "Ground_Depot", center, new Vector2(CELL_WIDTH, CELL_HEIGHT), LAYER_ROAD,
-                new Color(0.32f, 0.30f, 0.26f));
+                new Color(0.32f, 0.30f, 0.26f), "INDUSTRIAL_DEPOT");
 
             Vector3[] offsets = { new Vector3(-6f, 3f, 0f), new Vector3(-6f, -3f, 0f), new Vector3(6f, 3f, 0f), new Vector3(6f, -3f, 0f) };
             for (int i = 0; i < offsets.Length; i++)
@@ -245,7 +244,7 @@ namespace AdaptiveWorld2D.World
         private static void BuildWaterfrontDocks(Transform parent, Vector3 center)
         {
             CreateGroundQuad(parent, "Ground_Pier", center, new Vector2(CELL_WIDTH, CELL_HEIGHT - 4f), LAYER_ROAD,
-                new Color(0.40f, 0.36f, 0.28f));
+                new Color(0.40f, 0.36f, 0.28f), "WATERFRONT_DOCKS");
 
             CreateSolidWall(parent, "WaterBoundary", center + new Vector3(0f, -(CELL_HEIGHT / 2f - 1f), 0f), new Vector2(CELL_WIDTH, 2f), LAYER_BUILDING,
                 new Color(0.10f, 0.25f, 0.45f));
@@ -254,7 +253,7 @@ namespace AdaptiveWorld2D.World
         private static void BuildSecurityCompound(Transform parent, Vector3 center)
         {
             CreateGroundQuad(parent, "Ground_Compound", center, new Vector2(CELL_WIDTH, CELL_HEIGHT), LAYER_BUILDING,
-                new Color(0.24f, 0.24f, 0.26f));
+                new Color(0.24f, 0.24f, 0.26f), "SECURITY_COMPOUND");
 
             float w = 16f, h = 11f, t = 0.6f;
             Color wallColor = new Color(0.32f, 0.32f, 0.34f);
@@ -270,8 +269,7 @@ namespace AdaptiveWorld2D.World
             gate.transform.position = center + new Vector3(0f, -h / 2f, 0f);
             SpriteRenderer sr = gate.AddComponent<SpriteRenderer>();
             sr.sprite = WorldManifestApplier.GetUniversalWhiteSprite();
-            sr.drawMode = SpriteDrawMode.Sliced;
-            sr.size = new Vector2(2f, 0.3f);
+            gate.transform.localScale = new Vector3(2f, 0.3f, 1f);
             sr.color = new Color(0.9f, 0.75f, 0.15f, 0.8f);
             sr.sortingOrder = 1;
         }
@@ -279,7 +277,7 @@ namespace AdaptiveWorld2D.World
         private static void BuildOpenStreet(Transform parent, Vector3 center)
         {
             CreateGroundQuad(parent, "Ground_OpenStreet", center, new Vector2(CELL_WIDTH, CELL_HEIGHT), LAYER_ROAD,
-                new Color(0.30f, 0.30f, 0.32f));
+                new Color(0.30f, 0.30f, 0.32f), "OPEN_STREET");
             CreateCrate(parent, "StreetCrate_01", center + new Vector3(-4f, 3f, 0f));
             CreateCrate(parent, "StreetCrate_02", center + new Vector3(4f, -3f, 0f));
         }
@@ -287,7 +285,7 @@ namespace AdaptiveWorld2D.World
         private static void BuildVacantLot(Transform parent, Vector3 center)
         {
             CreateGroundQuad(parent, "Ground_VacantLot", center, new Vector2(CELL_WIDTH, CELL_HEIGHT), LAYER_ROAD,
-                new Color(0.34f, 0.33f, 0.28f));
+                new Color(0.34f, 0.33f, 0.28f), "VACANT_LOT");
         }
 
         private static void BuildGateway(Transform parent, RoomGraphManifest rg, ConnectionConfig conn)
@@ -335,7 +333,7 @@ namespace AdaptiveWorld2D.World
             }
         }
 
-        private static GameObject CreateGroundQuad(Transform parent, string name, Vector3 center, Vector2 size, int layer, Color color)
+        private static GameObject CreateGroundQuad(Transform parent, string name, Vector3 center, Vector2 size, int layer, Color color, string module = null)
         {
             GameObject go = new GameObject(name);
             go.transform.SetParent(parent);
@@ -343,10 +341,17 @@ namespace AdaptiveWorld2D.World
             go.layer = layer;
 
             SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
-            sr.sprite = WorldManifestApplier.GetUniversalWhiteSprite();
-            sr.drawMode = SpriteDrawMode.Sliced;
+            var catalog = SectorThemeCatalog.GetDefault();
+            Sprite tile = null;
+            if (catalog != null)
+            {
+                tile = (layer == LAYER_BUILDING) ? catalog.GetFloorTile(module) : catalog.GetRoadTile(module);
+            }
+            sr.sprite = (tile != null) ? tile : WorldManifestApplier.GetUniversalWhiteSprite();
+            sr.drawMode = SpriteDrawMode.Tiled;
             sr.size = size;
-            sr.color = color;
+            sr.color = Color.white;
+            sr.sortingLayerName = "Background";
             sr.sortingOrder = -10;
 
             BoxCollider2D col = go.AddComponent<BoxCollider2D>();
@@ -355,7 +360,7 @@ namespace AdaptiveWorld2D.World
             return go;
         }
 
-        private static GameObject CreateSolidWall(Transform parent, string name, Vector3 pos, Vector2 size, int layer, Color color)
+        private static GameObject CreateSolidWall(Transform parent, string name, Vector3 pos, Vector2 size, int layer, Color color, bool reinforced = false)
         {
             GameObject go = new GameObject(name);
             go.transform.SetParent(parent);
@@ -363,19 +368,20 @@ namespace AdaptiveWorld2D.World
             go.layer = layer;
 
             SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
-            sr.sprite = WorldManifestApplier.GetUniversalWhiteSprite();
-            sr.drawMode = SpriteDrawMode.Sliced;
+            var catalog = SectorThemeCatalog.GetDefault();
+            Sprite tile = catalog != null ? catalog.GetWallTile(reinforced) : WorldManifestApplier.GetUniversalWhiteSprite();
+            sr.sprite = (tile != null) ? tile : WorldManifestApplier.GetUniversalWhiteSprite();
+            sr.drawMode = SpriteDrawMode.Tiled;
             sr.size = size;
-            sr.color = color;
+            sr.color = Color.white;
+            sr.sortingLayerName = "Obstacles";
             sr.sortingOrder = 0;
 
             BoxCollider2D col = go.AddComponent<BoxCollider2D>();
             col.size = size;
             col.isTrigger = false;
 
-            // 2D Shadow Caster Integration (§3.3B)
             TryAttachShadowCaster(go);
-
             return go;
         }
 
@@ -398,8 +404,7 @@ namespace AdaptiveWorld2D.World
 
             SpriteRenderer sr = crate.AddComponent<SpriteRenderer>();
             sr.sprite = WorldManifestApplier.GetUniversalWhiteSprite();
-            sr.drawMode = SpriteDrawMode.Sliced;
-            sr.size = new Vector2(0.8f, 0.8f);
+            crate.transform.localScale = new Vector3(0.8f, 0.8f, 1f);
             sr.color = new Color(0.5f, 0.42f, 0.3f);
             sr.sortingOrder = 2;
 
@@ -415,8 +420,7 @@ namespace AdaptiveWorld2D.World
 
             SpriteRenderer sr = pole.AddComponent<SpriteRenderer>();
             sr.sprite = WorldManifestApplier.GetUniversalWhiteSprite();
-            sr.drawMode = SpriteDrawMode.Sliced;
-            sr.size = new Vector2(0.15f, 1.2f);
+            pole.transform.localScale = new Vector3(0.15f, 1.2f, 1f);
             sr.sortingOrder = 3;
 
             // Dynamic Streetlight Controller (§5.3A)
@@ -432,8 +436,7 @@ namespace AdaptiveWorld2D.World
 
             SpriteRenderer sr = marker.AddComponent<SpriteRenderer>();
             sr.sprite = WorldManifestApplier.GetUniversalWhiteSprite();
-            sr.drawMode = SpriteDrawMode.Sliced;
-            sr.size = new Vector2(1.6f, 0.5f);
+            marker.transform.localScale = new Vector3(1.6f, 0.5f, 1f);
             sr.color = color;
             sr.sortingOrder = 20;
         }

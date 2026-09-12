@@ -66,6 +66,25 @@ public static class AdaptiveSceneBuilder
         }
     }
 
+    private static bool EnsureFullRectSpriteImporter(TextureImporter importer)
+    {
+        if (importer == null) return false;
+
+        TextureImporterSettings settings = new TextureImporterSettings();
+        importer.ReadTextureSettings(settings);
+        if (importer.textureType == TextureImporterType.Sprite &&
+            settings.spriteMeshType == SpriteMeshType.FullRect)
+        {
+            return false;
+        }
+
+        importer.textureType = TextureImporterType.Sprite;
+        settings.spriteMeshType = SpriteMeshType.FullRect;
+        importer.SetTextureSettings(settings);
+        importer.SaveAndReimport();
+        return true;
+    }
+
 
     [MenuItem("AdaptiveWorld/Ensure Sprites Imported", priority = 99)]
     public static void EnsureAssetsImportedAsSprites()
@@ -82,12 +101,8 @@ public static class AdaptiveSceneBuilder
             {
                 string relPath = "Assets" + file.Substring(Application.dataPath.Length).Replace('\\', '/');
                 TextureImporter importer = AssetImporter.GetAtPath(relPath) as TextureImporter;
-                if (importer != null && importer.textureType != TextureImporterType.Sprite)
-                {
-                    importer.textureType = TextureImporterType.Sprite;
-                    importer.SaveAndReimport();
+                if (EnsureFullRectSpriteImporter(importer))
                     reimportedAny = true;
-                }
             }
         }
         if (reimportedAny)
@@ -105,10 +120,8 @@ public static class AdaptiveSceneBuilder
 
         // Try reimporting if imported as default texture
         TextureImporter importer = AssetImporter.GetAtPath(fullPath) as TextureImporter;
-        if (importer != null && importer.textureType != TextureImporterType.Sprite)
+        if (EnsureFullRectSpriteImporter(importer))
         {
-            importer.textureType = TextureImporterType.Sprite;
-            importer.SaveAndReimport();
             s = AssetDatabase.LoadAssetAtPath<Sprite>(fullPath);
             if (s != null) return s;
         }
@@ -122,17 +135,25 @@ public static class AdaptiveSceneBuilder
         }
 
         Debug.LogWarning($"[SceneBuilder] Sprite not found: '{relativePath}'. Using fallback.");
-        return GetWhiteSprite();
+        return WorldManifestApplier.GetUniversalWhiteSprite();
     }
 
     // ═════════════════════════════════════════════════════════════
     //  BATCH BUILD & SAVE BOTH MAPS
     // ═════════════════════════════════════════════════════════════
+    [MenuItem("AdaptiveWorld/Generate & Populate SectorThemeCatalog", priority = 1)]
+    public static void MenuPopulateCatalog()
+    {
+        EnsureAssetsImportedAsSprites();
+        AdaptiveWorld2D.World.SectorThemeCatalog.CreateOrPopulateAsset();
+    }
+
     [MenuItem("AdaptiveWorld/Build & Save BOTH Maps (Map 1 & Map 2)", priority = 0)]
     public static void BuildAndSaveBothMaps()
     {
         Debug.Log("[SceneBuilder] === BATCH BUILDING BOTH MAPS ===");
         EnsureAssetsImportedAsSprites();
+        AdaptiveWorld2D.World.SectorThemeCatalog.CreateOrPopulateAsset();
 
         // 1. Open and build Map 1
         var map1Scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene("Assets/Scenes/Map1.unity");
@@ -187,6 +208,7 @@ public static class AdaptiveSceneBuilder
     {
         Debug.Log("[SceneBuilder] === BUILDING MAP 1 — FULL PHASE 2 CITY ===");
         EnsureAssetsImportedAsSprites();
+        AdaptiveWorld2D.World.SectorThemeCatalog.CreateOrPopulateAsset();
 
         // Automatically clear any leftover old objects from previous builds
         ClearAllExceptCamera();
@@ -290,45 +312,66 @@ public static class AdaptiveSceneBuilder
     }
 
     // ─────────────────────────────────────────────────────────────
-    //  MAP 1: ROAD SURFACE (asphalt tiles)
+    //  MAP 1: ROAD SURFACE (Catalog-driven asphalt & alley tiles)
     // ─────────────────────────────────────────────────────────────
     private static void BuildMap1_Roads()
     {
+        var catalog = AdaptiveWorld2D.World.SectorThemeCatalog.GetDefault();
+        Sprite highwayTile = catalog != null ? catalog.GetRoadTile("URBAN_HIGHWAY") : null;
+        Sprite alleyTile = catalog != null ? catalog.GetRoadTile("SLUM_ALLEYWAYS") : null;
+
         // Main 4-lane central boulevard (Y: -3 to +3)
         CreateRoadSurface("Road_Boulevard", new Vector3(0f, 0f, 0f),
-            new Vector2(62f, 7f), LAYER_ROAD);
+            new Vector2(62f, 7f), LAYER_ROAD, highwayTile);
 
         // North service road (Y: +10)
         CreateRoadSurface("Road_North_Service", new Vector3(0f, 10f, 0f),
-            new Vector2(62f, 3f), LAYER_ROAD);
+            new Vector2(62f, 3f), LAYER_ROAD, highwayTile);
 
         // South alley ground (Y: -12, darker alley tile)
         CreateRoadSurface("Road_South_Alley", new Vector3(-8f, -12f, 0f),
-            new Vector2(30f, 5f), LAYER_ALLEY,
-            "kenney_vehicles/PNG/Tiles/Asphalt road/road_asphalt07.png",
-            new Color(0.35f, 0.35f, 0.35f));
+            new Vector2(30f, 5f), LAYER_ALLEY, alleyTile,
+            new Color(0.7f, 0.7f, 0.7f));
     }
 
     private static void CreateRoadSurface(string name, Vector3 pos, Vector2 size,
         int layer,
-        string spritePath = "kenney_vehicles/PNG/Tiles/Asphalt road/road_asphalt01.png",
+        Sprite sprite = null,
         Color? tint = null)
     {
-        if (GameObject.Find(name) != null) return;
+        GameObject road = GameObject.Find(name);
+        if (road == null)
+        {
+            road = new GameObject(name);
+        }
 
-        GameObject road = new GameObject(name);
         road.transform.position = pos;
         road.layer = layer;
 
-        SpriteRenderer sr = road.AddComponent<SpriteRenderer>();
-        sr.sprite    = LoadSprite(spritePath);
+        SpriteRenderer sr = road.GetComponent<SpriteRenderer>();
+        if (sr == null)
+        {
+            sr = road.AddComponent<SpriteRenderer>();
+        }
+
+        if (sprite == null)
+        {
+            var catalog = AdaptiveWorld2D.World.SectorThemeCatalog.GetDefault();
+            sprite = catalog != null ? catalog.GetRoadTile("URBAN_HIGHWAY") : LoadSprite("kenney_topdown_shooter/PNG/Tiles/tile_01.png");
+        }
+        sr.sprite    = sprite;
         sr.drawMode  = SpriteDrawMode.Tiled;
         sr.size      = size;
         sr.color     = tint ?? Color.white;
+        sr.sortingLayerName = "Background";
         sr.sortingOrder = -10;
 
         // Walkable trigger for road telemetry
-        BoxCollider2D col = road.AddComponent<BoxCollider2D>();
+        BoxCollider2D col = road.GetComponent<BoxCollider2D>();
+        if (col == null)
+        {
+            col = road.AddComponent<BoxCollider2D>();
+        }
         col.size      = size;
         col.isTrigger = true;
     }
@@ -406,10 +449,12 @@ public static class AdaptiveSceneBuilder
         SafeSetTag(b, "Building");
 
         SpriteRenderer sr = b.AddComponent<SpriteRenderer>();
-        sr.sprite    = WorldManifestApplier.GetUniversalWhiteSprite(); // solid block; in Unity assign wall tiles
-        sr.drawMode  = SpriteDrawMode.Sliced;
+        var catalog = AdaptiveWorld2D.World.SectorThemeCatalog.GetDefault();
+        sr.sprite    = catalog != null ? catalog.GetWallTile(false) : WorldManifestApplier.GetUniversalWhiteSprite();
+        sr.drawMode  = SpriteDrawMode.Tiled;
         sr.size      = size;
-        sr.color     = color;
+        sr.color     = Color.white;
+        sr.sortingLayerName = "Obstacles";
         sr.sortingOrder = 0;
 
         BoxCollider2D col = b.AddComponent<BoxCollider2D>();
@@ -944,6 +989,7 @@ public static class AdaptiveSceneBuilder
     {
         Debug.Log("[SceneBuilder] === BUILDING MAP 2 ===");
         EnsureAssetsImportedAsSprites();
+        AdaptiveWorld2D.World.SectorThemeCatalog.CreateOrPopulateAsset();
 
         ClearAllExceptCamera();
 

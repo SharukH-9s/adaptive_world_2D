@@ -176,7 +176,8 @@ namespace AdaptiveWorld2D.Mission
             if (AdaptiveDirectorClient.Instance != null)
             {
                 AdaptiveDirectorClient.Instance.FlushQueue();
-                AdaptiveDirectorClient.Instance.RequestMission2Manifest(42, OnMission2Ready);
+                AdaptiveDirectorClient.Instance.RequestMission2Manifest(
+                    Mathf.Abs(System.DateTime.UtcNow.Ticks.GetHashCode()), OnMission2Ready);
             }
         }
 

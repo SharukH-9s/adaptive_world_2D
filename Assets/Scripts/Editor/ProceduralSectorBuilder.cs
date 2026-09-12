@@ -104,6 +104,7 @@ public static class ProceduralSectorBuilder
             return;
         }
 
+        AdaptiveWorld2D.World.SectorThemeCatalog.CreateOrPopulateAsset();
         GameObject root = SectorRuntimeBuilder.Build(roomGraph);
         if (root == null) return;
 

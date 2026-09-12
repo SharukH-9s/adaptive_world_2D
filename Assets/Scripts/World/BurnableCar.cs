@@ -64,6 +64,15 @@ namespace AdaptiveWorld2D.World
             if (explosionParticles != null) explosionParticles.Play();
             if (wreckedCarSprite != null && _sr != null) _sr.sprite = wreckedCarSprite;
 
+            // Trigger dynamic camera impulse feedback (§4.2)
+            if (CameraFollow2D.Instance != null)
+            {
+                CameraFollow2D.Instance.AddImpulse(0.8f);
+            }
+
+            // Spawn char/scorch decal on ground (§5.1)
+            DecalPool.Instance?.SpawnScorch(transform.position, 2.4f);
+
             Debug.Log($"[BurnableCar] Car {carId} exploded into a fireball!");
 
             // Phase 4 fix: use targeted layer masks so AOE only hits enemies and
@@ -77,7 +86,11 @@ namespace AdaptiveWorld2D.World
             {
                 if (col.gameObject == gameObject) continue;
                 var enemy = col.GetComponent<EnemyPatrol>();
-                if (enemy != null) enemy.TakeDamage(explosionDamage);
+                if (enemy != null)
+                {
+                    Vector2 blastDir = (enemy.transform.position - transform.position).normalized;
+                    enemy.TakeDamage(explosionDamage, blastDir);
+                }
             }
 
             // Damage destructible walls/props in blast radius
