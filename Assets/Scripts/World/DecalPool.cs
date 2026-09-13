@@ -7,10 +7,11 @@ using AdaptiveWorld2D.Director;
 namespace AdaptiveWorld2D.World
 {
     /// <summary>
-    /// Bounded circular buffer decal pool (§5.1 — Bounded Environmental Polish & Decals).
-    /// Enforces a strict ceiling of 50 active decals in the scene to prevent memory leaks and draw call bloat.
-    /// Manages blood splatters, shell casings, explosion scorch marks, and wall debris on the "Decals" sorting layer.
-    /// Fading decals are explicitly counted against the budget so the total in-scene count never exceeds 50.
+    /// Bounded FIFO decal pool (§5.1 — Bounded Environmental Polish &amp; Decals).
+    /// Enforces a strict ceiling of 50 active decals in the scene to prevent memory leaks
+    /// and draw call bloat. Uses two <see cref="Queue{T}"/>s (active + fading) rather than
+    /// a LinkedList+Dictionary mirror; the simpler structure avoids the null-key leak that
+    /// would occur when a destroyed GameObject's null reference was used as a dictionary key.
     /// </summary>
     public class DecalPool : MonoBehaviour
     {
@@ -35,9 +36,10 @@ namespace AdaptiveWorld2D.World
             }
         }
 
+        // Two plain FIFO queues — active decals waiting to be evicted, and decals currently fading.
+        // Budget = _activeDecals.Count + _fadingDecals.Count <= MAX_DECALS at all times.
         private readonly Queue<GameObject> _activeDecals = new Queue<GameObject>();
-        private readonly LinkedList<GameObject> _fadingDecals = new LinkedList<GameObject>();
-        private readonly Dictionary<GameObject, LinkedListNode<GameObject>> _fadingNodes = new Dictionary<GameObject, LinkedListNode<GameObject>>();
+        private readonly Queue<GameObject> _fadingDecals = new Queue<GameObject>();
 
         private static Sprite _blobSprite;
         private static Sprite _casingSprite;
@@ -115,18 +117,12 @@ namespace AdaptiveWorld2D.World
         private void ClearSceneDecals()
         {
             foreach (GameObject decal in _activeDecals)
-            {
                 if (decal != null) Destroy(decal);
-            }
-
             foreach (GameObject decal in _fadingDecals)
-            {
                 if (decal != null) Destroy(decal);
-            }
 
             _activeDecals.Clear();
             _fadingDecals.Clear();
-            _fadingNodes.Clear();
         }
 
         /// <summary>
@@ -239,7 +235,8 @@ namespace AdaptiveWorld2D.World
 
         /// <summary>
         /// Strict budget enforcement: ensures (_activeDecals + _fadingDecals) never exceeds MAX_DECALS.
-        /// If at capacity, any existing fading decal is immediately culled, and the oldest active decal begins fading.
+        /// When at capacity, the oldest fading decal is immediately destroyed (deterministic FIFO),
+        /// or the oldest active decal begins a 0.4 s alpha-fade before destruction.
         /// </summary>
         private void EnforceBudget()
         {
@@ -247,27 +244,19 @@ namespace AdaptiveWorld2D.World
 
             while (_activeDecals.Count + _fadingDecals.Count >= MAX_DECALS)
             {
-                // 1. If decals are already fading, immediately destroy the oldest fading decal (Deterministic FIFO)
+                // 1. Immediately destroy the oldest fading decal (deterministic FIFO)
                 if (_fadingDecals.Count > 0)
                 {
-                    var firstNode = _fadingDecals.First;
-                    GameObject oldestFading = firstNode.Value;
-                    _fadingDecals.RemoveFirst();
-                    _fadingNodes.Remove(oldestFading);
-
-                    if (oldestFading != null)
-                    {
-                        Destroy(oldestFading);
-                    }
+                    GameObject oldestFading = _fadingDecals.Dequeue();
+                    if (oldestFading != null) Destroy(oldestFading);
                 }
                 else if (_activeDecals.Count > 0)
                 {
-                    // 2. Otherwise transition the oldest active decal to fading
+                    // 2. Transition the oldest active decal into fading
                     GameObject oldest = _activeDecals.Dequeue();
                     if (oldest != null)
                     {
-                        var node = _fadingDecals.AddLast(oldest);
-                        _fadingNodes[oldest] = node;
+                        _fadingDecals.Enqueue(oldest);
                         StartCoroutine(FadeAndDestroy(oldest, 0.4f));
                     }
                 }
@@ -278,42 +267,34 @@ namespace AdaptiveWorld2D.World
             }
         }
 
+        /// <summary>
+        /// Purges destroyed (null) GameObjects from both queues by rebuilding each queue in place.
+        /// O(n) over ≤50 items — negligible cost, and avoids the null-key dictionary bug that
+        /// plagued the prior LinkedList+Dictionary implementation.
+        /// </summary>
         private void CleanDeadReferences()
         {
-            var node = _fadingDecals.First;
-            while (node != null)
-            {
-                var next = node.Next;
-                if (node.Value == null)
-                {
-                    _fadingNodes.Remove(node.Value);
-                    _fadingDecals.Remove(node);
-                }
-                node = next;
-            }
+            PurgeDestroyedFromQueue(_activeDecals);
+            PurgeDestroyedFromQueue(_fadingDecals);
         }
 
-        private void RemoveFading(GameObject decal)
+        private static void PurgeDestroyedFromQueue(Queue<GameObject> queue)
         {
-            if (_fadingNodes.TryGetValue(decal, out var node))
+            int count = queue.Count;
+            for (int i = 0; i < count; i++)
             {
-                _fadingDecals.Remove(node); // Strict O(1) linked-list pointer unlinking
-                _fadingNodes.Remove(decal); // Strict O(1) dictionary removal
+                GameObject go = queue.Dequeue();
+                if (go != null) queue.Enqueue(go);
             }
         }
 
         private IEnumerator FadeAndDestroy(GameObject decal, float duration)
         {
-            if (decal == null)
-            {
-                RemoveFading(decal);
-                yield break;
-            }
+            if (decal == null) yield break;
 
             SpriteRenderer sr = decal.GetComponent<SpriteRenderer>();
             if (sr == null)
             {
-                RemoveFading(decal);
                 Destroy(decal);
                 yield break;
             }
@@ -329,11 +310,9 @@ namespace AdaptiveWorld2D.World
                 yield return null;
             }
 
-            if (decal != null)
-            {
-                RemoveFading(decal);
-                Destroy(decal);
-            }
+            if (decal != null) Destroy(decal);
+            // The destroyed object becomes null in _fadingDecals; CleanDeadReferences
+            // will purge it on the next EnforceBudget call.
         }
 
         private static Sprite GetBlobSprite()

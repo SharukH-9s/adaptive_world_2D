@@ -70,9 +70,12 @@ namespace AdaptiveWorld2D.World
 
                 BuildModule(sectorRoot.transform, sector.module, center);
 
-                if (sector.id == roomGraph.player_spawn_sector) CreateRoleMarker(sectorRoot.transform, "SPAWN", center, new Color(0.2f, 0.9f, 1f, 0.9f));
-                if (sector.id == roomGraph.target_sector) CreateRoleMarker(sectorRoot.transform, "TARGET", center, new Color(1f, 0.2f, 0.2f, 0.9f));
-                if (sector.id == roomGraph.extraction_sector) CreateRoleMarker(sectorRoot.transform, "EXTRACTION", center, new Color(0.3f, 1f, 0.3f, 0.9f));
+                if (!Application.isPlaying && sector.id == roomGraph.player_spawn_sector)
+                    CreateRoleMarker(sectorRoot.transform, "SPAWN", center, new Color(0.2f, 0.9f, 1f, 0.9f));
+                if (!Application.isPlaying && sector.id == roomGraph.target_sector)
+                    CreateRoleMarker(sectorRoot.transform, "TARGET", center, new Color(1f, 0.2f, 0.2f, 0.9f));
+                if (!Application.isPlaying && sector.id == roomGraph.extraction_sector)
+                    CreateRoleMarker(sectorRoot.transform, "EXTRACTION", center, new Color(0.3f, 1f, 0.3f, 0.9f));
             }
 
             GameObject gatewaysRoot = new GameObject("Gateways");
@@ -403,9 +406,22 @@ namespace AdaptiveWorld2D.World
             crate.layer = LAYER_INTERACTABLE;
 
             SpriteRenderer sr = crate.AddComponent<SpriteRenderer>();
-            sr.sprite = WorldManifestApplier.GetUniversalWhiteSprite();
+            Sprite crateSprite = null;
+#if UNITY_EDITOR
+            string[] cratePaths =
+            {
+                "Assets/assets/kenney_topdown_shooter/PNG/Tiles/tile_131.png",
+                "Assets/assets/kenney_topdown_shooter/PNG/Tiles/tile_132.png"
+            };
+            foreach (string path in cratePaths)
+            {
+                crateSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(path);
+                if (crateSprite != null) break;
+            }
+#endif
+            sr.sprite = crateSprite != null ? crateSprite : WorldManifestApplier.GetUniversalWhiteSprite();
             crate.transform.localScale = new Vector3(0.8f, 0.8f, 1f);
-            sr.color = new Color(0.5f, 0.42f, 0.3f);
+            sr.color = crateSprite != null ? Color.white : new Color(0.5f, 0.42f, 0.3f);
             sr.sortingOrder = 2;
 
             BoxCollider2D col = crate.AddComponent<BoxCollider2D>();
@@ -476,6 +492,35 @@ namespace AdaptiveWorld2D.World
             // East
             CreateSolidWall(perim.transform, "Perimeter_E", new Vector3(halfW + thickness / 2f, 0f, 0f),
                 new Vector2(thickness, halfH * 2f + thickness * 2f), LAYER_BUILDING, wallColor);
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        //  SPRITE UTILITIES
+        // ─────────────────────────────────────────────────────────────
+
+        private static Sprite _universalWhiteSprite;
+
+        /// <summary>
+        /// Runtime-compatible white 2×2 sprite generator, cached statically to avoid repeated
+        /// texture allocations. Lives in the World namespace so that SectorRuntimeBuilder,
+        /// PlayerCombat, and AdaptiveSceneBuilder do not import the Director namespace for this.
+        /// </summary>
+        public static Sprite GetUniversalWhiteSprite()
+        {
+            if (_universalWhiteSprite == null)
+            {
+                Texture2D tex = new Texture2D(2, 2);
+                tex.SetPixels(new Color[] { Color.white, Color.white, Color.white, Color.white });
+                tex.Apply();
+                _universalWhiteSprite = Sprite.Create(
+                    tex,
+                    new Rect(0, 0, 2, 2),
+                    new Vector2(0.5f, 0.5f),
+                    1f,
+                    0,
+                    SpriteMeshType.FullRect);
+            }
+            return _universalWhiteSprite;
         }
     }
 }

@@ -60,6 +60,9 @@ namespace AdaptiveWorld2D.World
         {
             if (target == null)
             {
+                // Safety fallback: searches once per frame until a Player is found.
+                // After the first successful assignment, this branch never re-enters
+                // (target stays non-null for the rest of the session).
                 GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
                 if (playerObj != null) target = playerObj.transform;
                 else return;

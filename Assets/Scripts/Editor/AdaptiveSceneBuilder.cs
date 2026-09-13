@@ -66,7 +66,7 @@ public static class AdaptiveSceneBuilder
         }
     }
 
-    private static bool EnsureFullRectSpriteImporter(TextureImporter importer)
+    internal static bool EnsureFullRectSpriteImporter(TextureImporter importer)
     {
         if (importer == null) return false;
 

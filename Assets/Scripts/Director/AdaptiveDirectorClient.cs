@@ -251,10 +251,10 @@ namespace AdaptiveWorld2D.Director
 
         private void Awake()
         {
-            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            if (Instance != null && Instance != this) { Destroy(this); return; }
             Instance = this;
+            UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
             UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
-            DontDestroyOnLoad(gameObject); // Keep singleton + latestManifest alive across scene loads
         }
 
         private void OnDestroy()
@@ -267,7 +267,8 @@ namespace AdaptiveWorld2D.Director
         private static void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene,
                                           UnityEngine.SceneManagement.LoadSceneMode mode)
         {
-            bool isMap2 = scene.name.IndexOf("Map2", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool isMap2 = !string.IsNullOrEmpty(scene.name) &&
+                          scene.name.IndexOf("Map2", StringComparison.OrdinalIgnoreCase) >= 0;
             if (isMap2)
             {
 #if UNITY_2023_1_OR_NEWER
@@ -276,7 +277,7 @@ namespace AdaptiveWorld2D.Director
                 WorldManifestApplier applier = UnityEngine.Object.FindObjectOfType<WorldManifestApplier>();
 #endif
                 if (applier != null)
-                    applier.BootstrapForMap2();
+                    applier.BootstrapForMap2(scene);
                 else
                     Debug.LogWarning("[AdaptiveDirector] Map2 loaded but no WorldManifestApplier was found.");
                 return;

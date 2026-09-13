@@ -54,16 +54,26 @@ namespace AdaptiveWorld2D.Director
             BootstrapForMap2();
         }
 
-        public void BootstrapForMap2()
+        public void BootstrapForMap2(UnityEngine.SceneManagement.Scene targetScene = default)
         {
-            var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
-            ulong sceneHandle = activeScene.handle.GetRawData();
-            if (!IsMap2Scene() || _bootstrappedSceneHandle == sceneHandle)
+            UnityEngine.SceneManagement.Scene currentScene = targetScene.IsValid()
+                ? targetScene
+                : (gameObject.scene.IsValid() ? gameObject.scene : UnityEngine.SceneManagement.SceneManager.GetActiveScene());
+
+            bool isMap2 = (!string.IsNullOrEmpty(currentScene.name) && currentScene.name.IndexOf("Map2", StringComparison.OrdinalIgnoreCase) >= 0)
+                          || IsMap2Scene(gameObject);
+
+            if (!isMap2)
+                return;
+
+            ulong sceneHandle = currentScene.handle.GetRawData();
+            if (_bootstrappedSceneHandle == sceneHandle && _bootstrappedSceneHandle != 0)
                 return;
 
             _bootstrappedSceneHandle = sceneHandle;
             if (AdaptiveDirectorClient.Instance != null)
             {
+                AdaptiveDirectorClient.Instance.OnManifestReceived -= ApplyManifest;
                 AdaptiveDirectorClient.Instance.OnManifestReceived += ApplyManifest;
             }
 
@@ -169,10 +179,28 @@ namespace AdaptiveWorld2D.Director
             return Mathf.Abs(DateTime.UtcNow.Ticks.GetHashCode());
         }
 
-        /// <summary>Returns true when the active scene is the Map 2 assassination mission.</summary>
-        public static bool IsMap2Scene() =>
-            UnityEngine.SceneManagement.SceneManager.GetActiveScene().name
-                .IndexOf("Map2", StringComparison.OrdinalIgnoreCase) >= 0;
+        /// <summary>Returns true when the context or active/loaded scene is Map 2.</summary>
+        public static bool IsMap2Scene(GameObject context = null)
+        {
+            if (context != null && context.scene.IsValid() && !string.IsNullOrEmpty(context.scene.name))
+            {
+                if (context.scene.name.IndexOf("Map2", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+            var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            if (!string.IsNullOrEmpty(activeScene.name) &&
+                activeScene.name.IndexOf("Map2", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            for (int i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
+            {
+                var s = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);
+                if (s.isLoaded && !string.IsNullOrEmpty(s.name) &&
+                    s.name.IndexOf("Map2", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+            return false;
+        }
 
         public void ApplyManifest(MissionManifest manifest)
         {
@@ -366,7 +394,16 @@ namespace AdaptiveWorld2D.Director
                                           targetSectorCfg.center_y + gc.offset_y, 0f);
                 }
 
-                GameObject bodyguard = CreateProceduralGuard(pos, 900 + i);
+                if (guardPrefab == null)
+                    guardPrefab = Resources.Load<GameObject>("GuardPrefab");
+#if UNITY_EDITOR
+                if (guardPrefab == null)
+                    guardPrefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+                        "Assets/Prefabs/GuardPrefab.prefab");
+#endif
+                GameObject bodyguard = guardPrefab != null
+                    ? Instantiate(guardPrefab, pos, Quaternion.identity)
+                    : CreateProceduralGuard(pos, 900 + i);
                 if (bodyguard == null) continue;
 
                 bodyguard.name = $"Viktor_Bodyguard_{i:D2}";
@@ -399,9 +436,9 @@ namespace AdaptiveWorld2D.Director
                     det.reactionSpeed  = 1.8f; // React faster than regular guards
                 }
 
-                // Tint bodyguards a darker crimson to visually distinguish from patrol guards
+                // Slightly darken bodyguards without overriding their sprite artwork.
                 var sr = bodyguard.GetComponent<SpriteRenderer>();
-                if (sr != null) sr.color = new Color(0.7f, 0.1f, 0.1f);
+                if (sr != null) sr.color = new Color(0.85f, 0.85f, 0.85f);
             }
 
             Debug.Log($"[WorldManifestApplier] Spawned {bodyguardCount} personal bodyguards flanking Viktor.");
@@ -1214,16 +1251,36 @@ namespace AdaptiveWorld2D.Director
             int interactLayer = LayerMask.NameToLayer("Interactable");
             go.layer = interactLayer >= 0 ? interactLayer : 0;
 
-            // Barrel visual — small orange cylinder silhouette (circle approximation)
-            var sr    = go.AddComponent<SpriteRenderer>();
-            Texture2D tex = new Texture2D(16, 16);
-            float ctr = 8f;
-            for (int y = 0; y < 16; y++)
-                for (int x = 0; x < 16; x++)
-                    tex.SetPixel(x, y, Vector2.Distance(new Vector2(x, y), new Vector2(ctr, ctr)) <= ctr
-                        ? new Color(0.85f, 0.45f, 0.1f) : Color.clear);
-            tex.Apply();
-            sr.sprite       = Sprite.Create(tex, new Rect(0, 0, 16, 16), new Vector2(0.5f, 0.5f), 16f);
+            // Barrel visual — use an authored object sprite when available.
+            var sr = go.AddComponent<SpriteRenderer>();
+            Sprite barrelSprite = null;
+#if UNITY_EDITOR
+            string[] barrelPaths =
+            {
+                "Assets/assets/kenney_topdown_shooter/PNG/Tiles/tile_197.png",
+                "Assets/assets/kenney_topdown_shooter/PNG/Tiles/tile_206.png"
+            };
+            foreach (string path in barrelPaths)
+            {
+                barrelSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(path);
+                if (barrelSprite != null) break;
+            }
+#endif
+            if (barrelSprite != null)
+            {
+                sr.sprite = barrelSprite;
+            }
+            else
+            {
+                Texture2D tex = new Texture2D(16, 16);
+                float ctr = 8f;
+                for (int y = 0; y < 16; y++)
+                    for (int x = 0; x < 16; x++)
+                        tex.SetPixel(x, y, Vector2.Distance(new Vector2(x, y), new Vector2(ctr, ctr)) <= ctr
+                            ? new Color(0.85f, 0.45f, 0.1f) : Color.clear);
+                tex.Apply();
+                sr.sprite = Sprite.Create(tex, new Rect(0, 0, 16, 16), new Vector2(0.5f, 0.5f), 16f);
+            }
             sr.sortingOrder = 2;
 
             var col    = go.AddComponent<BoxCollider2D>();
@@ -1246,13 +1303,32 @@ namespace AdaptiveWorld2D.Director
 
             // Car visual — dark grey box silhouette
             var sr = go.AddComponent<SpriteRenderer>();
-            Texture2D tex = new Texture2D(32, 16);
-            Color carColor = new Color(0.25f, 0.25f, 0.3f);
-            for (int y = 0; y < 16; y++)
-                for (int x = 0; x < 32; x++)
-                    tex.SetPixel(x, y, carColor);
-            tex.Apply();
-            sr.sprite       = Sprite.Create(tex, new Rect(0, 0, 32, 16), new Vector2(0.5f, 0.5f), 16f);
+            Sprite carSprite = null;
+#if UNITY_EDITOR
+            string[] carPaths =
+            {
+                "Assets/assets/kenney_vehicles/PNG/Cars/car_black_1.png",
+                "Assets/assets/kenney_vehicles/PNG/Cars/car_blue_1.png",
+                "Assets/assets/kenney_vehicles/PNG/Cars/car_red_1.png"
+            };
+            string chosenPath = carPaths[Mathf.Abs(id.GetHashCode()) % carPaths.Length];
+            carSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(chosenPath);
+#endif
+            if (carSprite != null)
+            {
+                sr.sprite = carSprite;
+                go.transform.localScale = new Vector3(1f, 0.6f, 1f);
+            }
+            else
+            {
+                Texture2D tex = new Texture2D(32, 16);
+                Color carColor = new Color(0.25f, 0.25f, 0.3f);
+                for (int y = 0; y < 16; y++)
+                    for (int x = 0; x < 32; x++)
+                        tex.SetPixel(x, y, carColor);
+                tex.Apply();
+                sr.sprite = Sprite.Create(tex, new Rect(0, 0, 32, 16), new Vector2(0.5f, 0.5f), 16f);
+            }
             sr.sortingOrder = 3;
 
             var col         = go.AddComponent<BoxCollider2D>();
@@ -1265,6 +1341,7 @@ namespace AdaptiveWorld2D.Director
             var car         = go.AddComponent<AdaptiveWorld2D.World.BurnableCar>();
             car.carId       = id;
             car.carType     = "SEDAN";
+            car.cleanCarSprite = carSprite;
         }
 
         /// <summary>
@@ -1277,19 +1354,31 @@ namespace AdaptiveWorld2D.Director
             go.transform.position = pos;
             SafeSetTag(go, "AmmoPickup");
 
-            // Visual: small bright-green crate with "AMMO" silhouette
+            // Visual: use an authored cache sprite when available.
             var sr = go.AddComponent<SpriteRenderer>();
-            Texture2D tex = new Texture2D(12, 12);
-            Color ammoColor = new Color(0.1f, 0.85f, 0.25f);
-            Color crossColor = new Color(0.05f, 0.45f, 0.1f);
-            for (int y = 0; y < 12; y++)
-                for (int x = 0; x < 12; x++)
-                {
-                    bool isCross = (x == 5 || x == 6) || (y == 5 || y == 6);
-                    tex.SetPixel(x, y, isCross ? crossColor : ammoColor);
-                }
-            tex.Apply();
-            sr.sprite       = Sprite.Create(tex, new Rect(0, 0, 12, 12), new Vector2(0.5f, 0.5f), 12f);
+            Sprite ammoSprite = null;
+#if UNITY_EDITOR
+            ammoSprite = UnityEditor.AssetDatabase.LoadAssetAtPath<Sprite>(
+                "Assets/assets/kenney_topdown_shooter/PNG/Tiles/tile_183.png");
+#endif
+            if (ammoSprite != null)
+            {
+                sr.sprite = ammoSprite;
+            }
+            else
+            {
+                Texture2D tex = new Texture2D(12, 12);
+                Color ammoColor = new Color(0.1f, 0.85f, 0.25f);
+                Color crossColor = new Color(0.05f, 0.45f, 0.1f);
+                for (int y = 0; y < 12; y++)
+                    for (int x = 0; x < 12; x++)
+                    {
+                        bool isCross = (x == 5 || x == 6) || (y == 5 || y == 6);
+                        tex.SetPixel(x, y, isCross ? crossColor : ammoColor);
+                    }
+                tex.Apply();
+                sr.sprite = Sprite.Create(tex, new Rect(0, 0, 12, 12), new Vector2(0.5f, 0.5f), 12f);
+            }
             sr.sortingOrder = 3;
 
             // Trigger collider
@@ -1306,24 +1395,14 @@ namespace AdaptiveWorld2D.Director
         /// standalone builds. Cached statically to avoid repeated texture allocations.
         /// Shared with ProceduralSectorBuilder so wall/ground quads work at runtime.
         /// </summary>
-        private static Sprite _universalWhiteSprite;
+        /// <summary>
+        /// Thin wrapper delegating to SectorRuntimeBuilder so that World-namespace callers
+        /// (SectorRuntimeBuilder, PlayerCombat, AdaptiveSceneBuilder) do not depend on the
+        /// Director namespace solely for a white pixel sprite.
+        /// </summary>
         public static Sprite GetUniversalWhiteSprite()
-        {
-            if (_universalWhiteSprite == null)
-            {
-                Texture2D tex = new Texture2D(2, 2);
-                tex.SetPixels(new Color[] { Color.white, Color.white, Color.white, Color.white });
-                tex.Apply();
-                _universalWhiteSprite = Sprite.Create(
-                    tex,
-                    new Rect(0, 0, 2, 2),
-                    new Vector2(0.5f, 0.5f),
-                    1f,
-                    0,
-                    SpriteMeshType.FullRect);
-            }
-            return _universalWhiteSprite;
-        }
+            => AdaptiveWorld2D.World.SectorRuntimeBuilder.GetUniversalWhiteSprite();
+
 
         private static void SafeSetTag(GameObject go, string tag)
         {

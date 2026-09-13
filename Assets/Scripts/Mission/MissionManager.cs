@@ -26,10 +26,10 @@ namespace AdaptiveWorld2D.Mission
 
         private void Awake()
         {
-            if (Instance != null && Instance != this) { Destroy(gameObject); return; }
+            if (Instance != null && Instance != this) { Destroy(this); return; }
             Instance = this;
             // Force mission number based on which scene we're in — overrides any Inspector value
-            currentMission = WorldManifestApplier.IsMap2Scene() ? 2 : 1;
+            currentMission = WorldManifestApplier.IsMap2Scene(gameObject) ? 2 : 1;
         }
 
         private void Start()
@@ -118,6 +118,10 @@ namespace AdaptiveWorld2D.Mission
             if (AdaptiveDirectorClient.Instance != null)
             {
                 AdaptiveDirectorClient.Instance.OnManifestReceived -= OnDirectorManifestReceived;
+            }
+            if (Instance == this)
+            {
+                Instance = null;
             }
         }
 

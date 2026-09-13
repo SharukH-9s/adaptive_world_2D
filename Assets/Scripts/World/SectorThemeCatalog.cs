@@ -60,8 +60,6 @@ namespace AdaptiveWorld2D.World
             }
         }
 
-        /// <summary>
-        /// Gets a ground/road sprite for the given sector module.
         private static Sprite _fallbackRoadSprite;
         private static Sprite _fallbackWallSprite;
 
@@ -118,21 +116,6 @@ namespace AdaptiveWorld2D.World
             }
 
             return defaultRoadTile != null ? defaultRoadTile : GetFallbackRoadSprite();
-        }
-
-        /// <summary>
-        /// Gets all road tiles configured for a module (useful for multi-tile road patterns).
-        /// </summary>
-        public Sprite[] GetRoadTilesForModule(string module)
-        {
-            BuildLookup();
-            if (!string.IsNullOrEmpty(module) && _lookup != null && _lookup.TryGetValue(module, out var m))
-            {
-                if (m.roadTiles != null && m.roadTiles.Length > 0)
-                    return m.roadTiles;
-            }
-
-            return defaultRoadTile != null ? new[] { defaultRoadTile } : new[] { GetFallbackRoadSprite() };
         }
 
         /// <summary>
@@ -212,6 +195,10 @@ namespace AdaptiveWorld2D.World
         /// Automatically generates and links the SectorThemeCatalog ScriptableObject asset
         /// with references to the existing Kenney top-down shooter tiles.
         /// </summary>
+        // NOTE: This is intentionally a private copy of the same helper in AdaptiveSceneBuilder.
+        // SectorThemeCatalog lives in the runtime assembly (Assets/Scripts/World/) and cannot
+        // reference AdaptiveSceneBuilder which is in the editor-only assembly (Assets/Scripts/Editor/).
+        // Unity's assembly boundary applies even inside #if UNITY_EDITOR blocks.
         private static bool EnsureFullRectSpriteImporter(TextureImporter importer)
         {
             if (importer == null) return false;

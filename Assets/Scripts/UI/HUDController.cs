@@ -34,8 +34,14 @@ namespace AdaptiveWorld2D.UI
 
         private void Awake()
         {
-            if (_instance != null && _instance != this) { Destroy(gameObject); return; }
+            if (_instance != null && _instance != this) { Destroy(this); return; }
             _instance = this;
+        }
+
+        private void OnDestroy()
+        {
+            if (_instance == this)
+                _instance = null;
         }
 
         private void Start()

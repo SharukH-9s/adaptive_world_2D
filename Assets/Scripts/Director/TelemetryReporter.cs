@@ -39,14 +39,18 @@ namespace AdaptiveWorld2D.Director
 
         private void Awake()
         {
-            if (Instance == null)
+            if (Instance != null && Instance != this)
             {
-                Instance = this;
+                Destroy(this);
+                return;
             }
-            else
-            {
-                Destroy(gameObject);
-            }
+            Instance = this;
+        }
+
+        private void OnDestroy()
+        {
+            if (Instance == this)
+                Instance = null;
         }
 
         public void ReportMovement(string movementType, string surface, float duration, float avgSpeed, float distance)

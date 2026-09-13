@@ -195,8 +195,7 @@ namespace AdaptiveWorld2D.Player
             GameObject flashObj = new GameObject("MuzzleFlashLight");
             flashObj.transform.position = new Vector3(pos.x, pos.y, 0f);
 
-#if UNITY_URP || UNITY_2021_2_OR_NEWER
-            // Attach 2D point light if Universal Render Pipeline 2D lighting is present
+            // Attach 2D point light via reflection if URP is present at runtime.
             var lightType = System.Type.GetType("UnityEngine.Rendering.Universal.Light2D, Unity.RenderPipelines.Universal.Runtime");
             if (lightType != null)
             {
@@ -209,7 +208,6 @@ namespace AdaptiveWorld2D.Player
                 intensityProp?.SetValue(lightComp, 2.5f);
                 radiusProp?.SetValue(lightComp, 5.0f);
             }
-#endif
 
             // Fallback visual flash glow quad
             SpriteRenderer sr = flashObj.AddComponent<SpriteRenderer>();
