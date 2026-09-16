@@ -25,8 +25,11 @@ namespace AdaptiveWorld2D.AI
         /// </summary>
         private float _baseVisionRange = -1f;
 
+        [Header("Dependencies (Phase 4 — assign in Inspector to skip tag lookup)")]
+        [Tooltip("Assign the Player transform here. When null at Start, falls back to GameObject.FindGameObjectWithTag(\"Player\").")]
+        [SerializeField] private Transform _playerTransform;
+
         private EnemyPatrol _patrol;
-        private Transform _playerTransform;
         private float _awarenessTimer = 0f;
         private const float BaseAlertThreshold = 0.6f;
 
@@ -37,8 +40,11 @@ namespace AdaptiveWorld2D.AI
 
         private void Start()
         {
-            var p = GameObject.FindGameObjectWithTag("Player");
-            if (p != null) _playerTransform = p.transform;
+            if (_playerTransform == null)
+            {
+                var p = GameObject.FindGameObjectWithTag("Player");
+                if (p != null) _playerTransform = p.transform;
+            }
             if (alertIconObject != null) alertIconObject.SetActive(false);
 
             // Capture the initial inspector-assigned range as the base
@@ -128,6 +134,13 @@ namespace AdaptiveWorld2D.AI
             _baseVisionRange = range;
             visionRange = range; // Reset to full before visibility is applied
         }
+
+        /// <summary>
+        /// True while the vision awareness timer is accumulating but has not yet crossed the alert
+        /// threshold. Used by <see cref="EnemyStateAdapter"/> to derive the
+        /// <see cref="EnemyState.Investigating"/> state without exposing the raw timer.
+        /// </summary>
+        public bool IsPartiallyAware => _awarenessTimer > 0f && !_patrol.isAlerted;
 
         /// <summary>Force-alerts the guard (used by AlertSystem sector broadcast and EnemyPatrol.Alert()).</summary>
         public void OnForceAlert()

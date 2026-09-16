@@ -26,6 +26,10 @@ namespace AdaptiveWorld2D.Player
         private Vector2 _moveInput;
         private SpriteRenderer _spriteRenderer;
 
+        [Header("Dependencies (Phase 4 — assign in Inspector to skip singleton lookup)")]
+        [Tooltip("Assign TelemetryReporter here. When null at Start, falls back to TelemetryReporter.Instance.")]
+        [SerializeField] private TelemetryReporter _telemetryReporter;
+
         // Telemetry tracking variables
         private float _intervalTimer = 0f;
         private Vector2 _lastPosition;
@@ -33,6 +37,12 @@ namespace AdaptiveWorld2D.Player
         private string _currentSurface = "ROAD";
 
         public Vector2 MoveDirection => _moveInput;
+
+        private void Start()
+        {
+            if (_telemetryReporter == null)
+                _telemetryReporter = TelemetryReporter.Instance;
+        }
 
         private void Awake()
         {
@@ -91,9 +101,9 @@ namespace AdaptiveWorld2D.Player
             _moveInput = new Vector2(h, v).normalized;
 
             // Rotate player sprite towards movement direction
-            if (_moveInput.magnitude > 0.05f)
+            if (PlayerMovementModel.ShouldRotate(_moveInput))
             {
-                float angle = Mathf.Atan2(_moveInput.y, _moveInput.x) * Mathf.Rad2Deg - 90f;
+                float angle = PlayerMovementModel.ComputeFacingAngleDegrees(_moveInput);
                 transform.rotation = Quaternion.Euler(0f, 0f, angle);
             }
         }
@@ -103,20 +113,20 @@ namespace AdaptiveWorld2D.Player
             if (_rb == null) _rb = GetComponent<Rigidbody2D>();
             if (_rb == null) return;
 
-            float speed = isDriving ? driveSpeed : (isSprinting ? runSpeed : walkSpeed);
+            float speed = PlayerMovementModel.SelectSpeed(isDriving, isSprinting, walkSpeed, runSpeed, driveSpeed);
 
             // Kinematic bodies use MovePosition; Dynamic bodies use linearVelocity
             if (_rb.bodyType == RigidbodyType2D.Kinematic)
             {
-                _rb.MovePosition(_rb.position + _moveInput * speed * Time.fixedDeltaTime);
+                _rb.MovePosition(PlayerMovementModel.ComputeKinematicDisplacement(_rb.position, _moveInput, speed, Time.fixedDeltaTime));
             }
             else
             {
-                _rb.linearVelocity = _moveInput * speed;
+                _rb.linearVelocity = PlayerMovementModel.ComputeVelocity(_moveInput, speed);
                 // Direct positional fallback if velocity doesn't move body
                 if (_moveInput.sqrMagnitude > 0.001f && _rb.linearVelocity.sqrMagnitude == 0f)
                 {
-                    _rb.position += _moveInput * speed * Time.fixedDeltaTime;
+                    _rb.position = PlayerMovementModel.ComputeKinematicDisplacement(_rb.position, _moveInput, speed, Time.fixedDeltaTime);
                 }
             }
 
@@ -139,7 +149,7 @@ namespace AdaptiveWorld2D.Player
             string text = $"<b>[PLAYER DEBUG]</b>\n" +
                           $"Position: ({pos.x:F2}, {pos.y:F2})\n" +
                           $"Input: {inputStr}\n" +
-                          $"Speed: {(isDriving ? driveSpeed : (isSprinting ? runSpeed : walkSpeed))} m/s\n" +
+                          $"Speed: {PlayerMovementModel.SelectSpeed(isDriving, isSprinting, walkSpeed, runSpeed, driveSpeed)} m/s\n" +
                           $"Distance Moved: {_accumulatedDistance:F1}m\n" +
                           $"<i>Click Game view to ensure focus!</i>";
 
@@ -157,12 +167,12 @@ namespace AdaptiveWorld2D.Player
             // Flush movement event every 3 seconds if player is moving
             if (_intervalTimer >= 3.0f)
             {
-                if (_accumulatedDistance > 0.5f && TelemetryReporter.Instance != null)
+                if (_accumulatedDistance > 0.5f && _telemetryReporter != null)
                 {
-                    string moveType = isDriving ? "DRIVE" : (isSprinting ? "RUN" : "WALK");
-                    float avgSpeed = _accumulatedDistance / _intervalTimer;
+                    string moveType = PlayerMovementModel.DetermineMovementType(isDriving, isSprinting);
+                    float avgSpeed = PlayerMovementModel.ComputeAverageSpeed(_accumulatedDistance, _intervalTimer);
 
-                    TelemetryReporter.Instance.ReportMovement(
+                    _telemetryReporter.ReportMovement(
                         moveType,
                         _currentSurface,
                         _intervalTimer,

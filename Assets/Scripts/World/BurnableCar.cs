@@ -28,12 +28,22 @@ namespace AdaptiveWorld2D.World
         public bool isOnFire = false;
         public bool isDestroyed = false;
 
+        [Header("Dependencies (Phase 4 — assign in Inspector to skip singleton lookup)")]
+        [Tooltip("Assign TelemetryReporter here. When null at Start, falls back to TelemetryReporter.Instance.")]
+        [SerializeField] private TelemetryReporter _telemetryReporter;
+
         private SpriteRenderer _sr;
 
         private void Awake()
         {
             _sr = GetComponent<SpriteRenderer>();
             if (cleanCarSprite != null && _sr != null) _sr.sprite = cleanCarSprite;
+        }
+
+        private void Start()
+        {
+            if (_telemetryReporter == null)
+                _telemetryReporter = TelemetryReporter.Instance;
         }
 
         public void Ignite()
@@ -111,9 +121,9 @@ namespace AdaptiveWorld2D.World
             }
 
             // Report telemetry
-            if (TelemetryReporter.Instance != null)
+            if (_telemetryReporter != null)
             {
-                TelemetryReporter.Instance.ReportDestruction("CAR_BURN", carId);
+                _telemetryReporter.ReportDestruction("CAR_BURN", carId);
             }
         }
 

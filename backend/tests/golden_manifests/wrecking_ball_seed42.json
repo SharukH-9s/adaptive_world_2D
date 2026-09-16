@@ -1,0 +1,49 @@
+{
+  "mission_id": "M02_THE_HIT",
+  "player_id": "player_01",
+  "player_archetype": "WRECKING_BALL",
+  "seed": 42,
+  "target": {
+    "name": "Viktor",
+    "location_id": "open_plaza",
+    "location_label": "Open Plaza (exposed)",
+    "armor": "heavy",
+    "health": 183,
+    "movement": "stationary",
+    "is_indoors": false
+  },
+  "guards": {
+    "count": 8,
+    "vision_range": 5.35,
+    "patrol_pattern": "static",
+    "armor": "heavy",
+    "reaction_speed": 0.89,
+    "label": "8 Guards (Wrecking Ball)"
+  },
+  "environment": {
+    "time_of_day": "day",
+    "weather": "clear",
+    "visibility": 1.0,
+    "ambient_label": "Clear Day \u2014 Full Exposure"
+  },
+  "routes": {
+    "primary_route_id": "main_road_north",
+    "primary_label": "Main Road North",
+    "blocked_routes": [
+      "alley_south"
+    ],
+    "gps_hint": "Barricades placed. Approach from main road."
+  },
+  "profile_stealth_ratio": 0.0,
+  "profile_aggression": 0.4,
+  "profile_destruction_index": 0.6,
+  "profile_vehicle_preference": 0.0,
+  "profile_avg_speed": 0.312,
+  "reasoning": [
+    "WRECKING_BALL: Target in open plaza with reinforced armor. Expects chaotic assault. Barricades deployed.",
+    "Guards: count=8, vision=5.35m, reaction=0.89x, armor=heavy",
+    "Environment: Clear Day \u2014 Full Exposure (visibility=1.0)",
+    "Primary route: Main Road North | Blocked: ['alley_south']",
+    "[OK] Invariant check: target location guaranteed reachable via primary route."
+  ]
+}

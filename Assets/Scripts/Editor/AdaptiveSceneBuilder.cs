@@ -46,6 +46,46 @@ public static class AdaptiveSceneBuilder
     private const int LAYER_ALLEY        = 9;
     private const int LAYER_BUILDING     = 10;
 
+    private static void EnsureTagsRegistered()
+    {
+        UnityEngine.Object[] assets = UnityEditor.AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/TagManager.asset");
+        if (assets == null || assets.Length == 0) return;
+
+        UnityEditor.SerializedObject tagManager = new UnityEditor.SerializedObject(assets[0]);
+        UnityEditor.SerializedProperty tagsProp = tagManager.FindProperty("tags");
+        if (tagsProp == null) return;
+
+        string[] requiredTags = { "Explosive", "NPC", "Civilian", "Building", "Interactable" };
+        bool modified = false;
+
+        foreach (string reqTag in requiredTags)
+        {
+            bool exists = false;
+            for (int i = 0; i < tagsProp.arraySize; i++)
+            {
+                if (tagsProp.GetArrayElementAtIndex(i).stringValue == reqTag)
+                {
+                    exists = true;
+                    break;
+                }
+            }
+
+            if (!exists)
+            {
+                int index = tagsProp.arraySize;
+                tagsProp.InsertArrayElementAtIndex(index);
+                tagsProp.GetArrayElementAtIndex(index).stringValue = reqTag;
+                modified = true;
+            }
+        }
+
+        if (modified)
+        {
+            tagManager.ApplyModifiedProperties();
+            UnityEditor.AssetDatabase.SaveAssets();
+        }
+    }
+
     private static void SafeSetTag(GameObject go, string tag)
     {
         try
@@ -65,6 +105,7 @@ public static class AdaptiveSceneBuilder
             Debug.LogWarning($"[SceneBuilder] Tag '{tag}' is not defined in Unity Project Settings. Object '{go.name}' left untagged.");
         }
     }
+
 
     internal static bool EnsureFullRectSpriteImporter(TextureImporter importer)
     {
@@ -152,6 +193,7 @@ public static class AdaptiveSceneBuilder
     public static void BuildAndSaveBothMaps()
     {
         Debug.Log("[SceneBuilder] === BATCH BUILDING BOTH MAPS ===");
+        EnsureTagsRegistered();
         EnsureAssetsImportedAsSprites();
         AdaptiveWorld2D.World.SectorThemeCatalog.CreateOrPopulateAsset();
 
@@ -207,6 +249,7 @@ public static class AdaptiveSceneBuilder
     public static void BuildMap1()
     {
         Debug.Log("[SceneBuilder] === BUILDING MAP 1 — FULL PHASE 2 CITY ===");
+        EnsureTagsRegistered();
         EnsureAssetsImportedAsSprites();
         AdaptiveWorld2D.World.SectorThemeCatalog.CreateOrPopulateAsset();
 

@@ -273,3 +273,42 @@ Unity executes a **7-step assembly line**:
 1. **Unity has zero hardcoded archetype presets**: Unity is a universal rendering and simulation engine that obeys whatever JSON blueprint it receives.
 2. **Python is the objective mathematician**: Computes hard metrics (accuracy, speed, destruction, kill style) without subjective hallucination.
 3. **Gemini is the creative architect & director**: Combines the player's psychology with level geometry to craft a custom, balanced, and cinematic Map 2 mission.
+
+---
+
+## How That Concept is Mapped Across the Components
+
+### 1. Unity is the "Executor / Factory" (Has the Tools & Assets)
+Unity does **not** make creative level-design decisions on its own. Instead, it provides the **physical capabilities and pre-imported assets**:
+* **Assets**: Sprites from Kenney (roads, alleys, warehouse floors, fences, barrels, cars, characters, weapons).
+* **Building Capabilities**:
+  * `SectorRuntimeBuilder.cs`: Knows *how* to lay out a 3×3 grid of sectors (`WAREHOUSE_INTERIOR`, `SLUM_ALLEYWAYS`, `WATERFRONT_DOCKS`, etc.).
+  * `WorldManifestApplier.cs`: Knows *how* to place barricades, assign guard vision cones, adjust rain/fog particle density, spawn Viktor, and hook up triggers.
+  * Physics, 2D raycast vision cones, pathfinding, and audio.
+
+### 2. Map 1 Collects the "Behavioral Story"
+While the player is running through Map 1 (*Pauper Streets*):
+* `TelemetryReporter.cs` tracks what the player actually did (did they sneak with a knife, ram through walls with cars, run full speed on main roads, or blast everything with loud gunfire?).
+* When Map 1 completes at extraction, this data is packaged into a JSON digest and sent to the backend.
+
+### 3. Gemini is the "Architect & Level Director"
+Gemini receives:
+1. **The Assets & Palette Available**: The allowed sector modules, edge barrier types, enemy types, and weather options.
+2. **The World Constraints**: The 3×3 grid layout ($60 \times 45$ units), ensuring an unbroken traversable path from `player_spawn` $\rightarrow$ `target_sector` $\rightarrow$ `extraction_sector`.
+3. **The Player's Psychological Profile & Map 1 History**: How the player actually behaved (e.g. `GHOST`, `WRECKING_BALL`, `SPEEDRUNNER`).
+
+With this knowledge, **Gemini decides**:
+* *Which* sector modules go into which grid cell (e.g., place a fortified warehouse in the NW, slum alleys in the South).
+* *Which* edges are open pathways vs. chainlink fences vs. heavy concrete roadblocks.
+* *Where* Viktor hides and how tough his bodyguards are.
+* *How* vigilant the guards are (their vision range, reaction speeds, hearing).
+* *What* atmosphere fits the narrative (foggy midnight, torrential downpour, etc.).
+
+### 4. The Loop Closes
+Gemini outputs the **Mission Manifest JSON**. Unity receives it, and `WorldManifestApplier.cs` executes Unity's built-in building functions to instantiate the exact world Gemini designed.
+
+> **In short:** 
+> - **Unity** provides the bricks, mortar, and workers.
+> - **Player actions in Map 1** provide the context and motive.
+> - **Gemini** acts as the lead architect, reading the story so far and handing Unity the exact blueprint to construct Map 2.
+

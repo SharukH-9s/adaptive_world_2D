@@ -34,9 +34,25 @@ namespace AdaptiveWorld2D.AI
         /// Set by WorldManifestApplier so AlertSystem can target the right sector.</summary>
         [HideInInspector] public string sectorId = "";
 
+        // ── Phase 3: Explicit AI State ────────────────────────────────────────
+        private EnemyState _state = EnemyState.Patrolling;
+
+        /// <summary>
+        /// The current explicit AI state, updated each <c>FixedUpdate</c> tick via
+        /// <see cref="EnemyStateAdapter"/>. Mirrors <c>isAlerted</c>, <c>isDead</c>,
+        /// the boss-retreat condition, and partial awareness; no behavior is changed.
+        /// </summary>
+        public EnemyState CurrentState => _state;
+        // ─────────────────────────────────────────────────────────────────────
+
+        [Header("Dependencies (Phase 4 — assign in Inspector to skip runtime lookup)")]
+        [Tooltip("Assign the Player transform here. When null at Start, falls back to FindGameObjectWithTag(\"Player\").")]
+        [SerializeField] private Transform _targetPlayer;
+        [Tooltip("Assign the MissionManager here. When null, falls back to MissionManager.Instance.")]
+        [SerializeField] private MissionManager _missionManager;
+
         private Rigidbody2D _rb;
         private int _currentWaypointIndex = 0;
-        private Transform _targetPlayer;
         private EnemyDetection _detection;
         private bool _hasSummonedReinforcements = false;
 
@@ -62,12 +78,38 @@ namespace AdaptiveWorld2D.AI
 
         private void Start()
         {
-            var playerObj = GameObject.FindGameObjectWithTag("Player");
-            if (playerObj != null) _targetPlayer = playerObj.transform;
+            if (_targetPlayer == null)
+            {
+                var playerObj = GameObject.FindGameObjectWithTag("Player");
+                if (playerObj != null) _targetPlayer = playerObj.transform;
+            }
+        }
+
+        [ContextMenu("Eliminate / Kill (Debug)")]
+        public void KillForDebug()
+        {
+            currentHealth = 0;
+            if (!isDead) Die();
         }
 
         private void FixedUpdate()
         {
+            if (!isDead && currentHealth <= 0)
+            {
+                Die();
+                return;
+            }
+
+            // ── Phase 3: resolve explicit state from existing booleans ────────
+            bool isBossRetreatingNow = EnemyDecisionModel.IsBossRetreating(isTargetBoss, currentHealth, maxHealth);
+            _state = EnemyStateAdapter.Resolve(
+                isDead,
+                isAlerted,
+                isBossRetreatingNow,
+                _detection != null && _detection.IsPartiallyAware,
+                _targetPlayer != null);
+            // ─────────────────────────────────────────────────────────────────
+
             if (isDead) return;
 
             if (isAlerted && _targetPlayer != null)
@@ -100,13 +142,13 @@ namespace AdaptiveWorld2D.AI
             // Rotate towards direction
             if (steerDir.magnitude > 0.1f)
             {
-                float angle = Mathf.Atan2(steerDir.y, steerDir.x) * Mathf.Rad2Deg - 90f;
+                float angle = EnemyDecisionModel.ComputeLookAngleDegrees(steerDir);
                 transform.rotation = Quaternion.Euler(0f, 0f, angle);
             }
 
             if (Vector2.Distance(transform.position, targetWp.position) <= waypointTolerance)
             {
-                _currentWaypointIndex = (_currentWaypointIndex + 1) % waypoints.Count;
+                _currentWaypointIndex = EnemyDecisionModel.AdvanceWaypointIndex(_currentWaypointIndex, waypoints.Count);
             }
         }
 
@@ -156,7 +198,8 @@ namespace AdaptiveWorld2D.AI
             // If Viktor's health drops below 40%, he executes a tactical retreat:
             // backs away from the player to create distance and broadcasts a sector
             // alert to summon remaining sector guards as reinforcements.
-            if (isTargetBoss && currentHealth < maxHealth * 0.4f)
+            bool isBossRetreating = EnemyDecisionModel.IsBossRetreating(isTargetBoss, currentHealth, maxHealth);
+            if (isBossRetreating)
             {
                 rawDir = -rawDir; // Back away toward cover
 
@@ -173,12 +216,12 @@ namespace AdaptiveWorld2D.AI
 
             // Steer around obstacles even while chasing to prevent wall-catching (§4.3A)
             Vector2 steerDir = ApplyObstacleAvoidance(rawDir);
-            float speed = (isTargetBoss && currentHealth < maxHealth * 0.4f) ? chaseSpeed * 0.85f : chaseSpeed;
+            float speed = EnemyDecisionModel.ComputeChaseSpeed(chaseSpeed, isBossRetreating);
             _rb.linearVelocity = steerDir * speed;
 
             if (steerDir.magnitude > 0.1f)
             {
-                float angle = Mathf.Atan2(steerDir.y, steerDir.x) * Mathf.Rad2Deg - 90f;
+                float angle = EnemyDecisionModel.ComputeLookAngleDegrees(steerDir);
                 transform.rotation = Quaternion.Euler(0f, 0f, angle);
             }
         }
@@ -187,15 +230,15 @@ namespace AdaptiveWorld2D.AI
         {
             if (isDead) return true;
 
-            int netDamage = Mathf.RoundToInt(rawDamage * (1.0f - damageResistance));
-            currentHealth -= Mathf.Max(1, netDamage);
+            var damageResult = EnemyDecisionModel.ComputeDamage(rawDamage, damageResistance, currentHealth);
+            currentHealth = damageResult.NewHealth;
 
             // Turn around and become alerted if attacked
             isAlerted = true;
 
-            Debug.Log($"[EnemyPatrol] Enemy took {netDamage} damage. HP remaining: {currentHealth}");
+            Debug.Log($"[EnemyPatrol] Enemy took {damageResult.MitigatedDamage} damage. HP remaining: {currentHealth}");
 
-            if (currentHealth <= 0)
+            if (damageResult.IsLethal)
             {
                 Die();
                 return true; // lethal
@@ -242,7 +285,8 @@ namespace AdaptiveWorld2D.AI
             if (isTargetBoss)
             {
                 Debug.Log("[EnemyPatrol] Target boss eliminated — notifying MissionManager!");
-                MissionManager.Instance?.OnTargetEliminated();
+                var mm = _missionManager != null ? _missionManager : MissionManager.Instance;
+                mm?.OnTargetEliminated();
             }
         }
     }

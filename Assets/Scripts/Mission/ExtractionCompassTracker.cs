@@ -26,17 +26,23 @@ namespace AdaptiveWorld2D.Director
         /// <summary>Radius of the screen-edge circle the arrow is clamped to (pixels).</summary>
         public float compassRadius = 200f;
 
+        [Header("Dependencies (Phase 4 — assign in Inspector to skip tag lookup)")]
+        [Tooltip("Assign the Player transform here. When null at Start, falls back to FindGameObjectWithTag(\"Player\").")]
+        [SerializeField] private Transform _playerTransform;
+
         private RectTransform _rt;
         private Camera _cam;
-        private Transform _playerTransform;
 
         private void Start()
         {
             _rt  = GetComponent<RectTransform>();
             _cam = Camera.main;
 
-            var playerGO = GameObject.FindGameObjectWithTag("Player");
-            if (playerGO != null) _playerTransform = playerGO.transform;
+            if (_playerTransform == null)
+            {
+                var playerGO = GameObject.FindGameObjectWithTag("Player");
+                if (playerGO != null) _playerTransform = playerGO.transform;
+            }
         }
 
         private void Update()

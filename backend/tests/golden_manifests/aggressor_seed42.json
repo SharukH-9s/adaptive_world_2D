@@ -1,0 +1,50 @@
+{
+  "mission_id": "M02_THE_HIT",
+  "player_id": "player_01",
+  "player_archetype": "AGGRESSOR",
+  "seed": 42,
+  "target": {
+    "name": "Viktor",
+    "location_id": "fortified_building",
+    "location_label": "Fortified Office (locked down)",
+    "armor": "reinforced",
+    "health": 331,
+    "movement": "stationary",
+    "is_indoors": true
+  },
+  "guards": {
+    "count": 10,
+    "vision_range": 7.68,
+    "patrol_pattern": "active",
+    "armor": "heavy",
+    "reaction_speed": 1.5,
+    "label": "10 Guards (Aggressor)"
+  },
+  "environment": {
+    "time_of_day": "night",
+    "weather": "rain",
+    "visibility": 0.45,
+    "ambient_label": "Heavy Rain at Night"
+  },
+  "routes": {
+    "primary_route_id": "main_road_north",
+    "primary_label": "Main Road North (heavily guarded)",
+    "blocked_routes": [
+      "alley_south",
+      "rooftop_access"
+    ],
+    "gps_hint": "Fortified perimeter. Expect heavy resistance from main road."
+  },
+  "profile_stealth_ratio": 0.0,
+  "profile_aggression": 1.0,
+  "profile_destruction_index": 0.0,
+  "profile_vehicle_preference": 0.0,
+  "profile_avg_speed": 0.312,
+  "reasoning": [
+    "AGGRESSOR: Target in fortified building, maximum armor. Enemies have learned from player's aggression \u2014 they are armored.",
+    "Guards: count=10, vision=7.68m, reaction=1.5x, armor=heavy",
+    "Environment: Heavy Rain at Night (visibility=0.45)",
+    "Primary route: Main Road North (heavily guarded) | Blocked: ['alley_south', 'rooftop_access']",
+    "[OK] Invariant check: target location guaranteed reachable via primary route."
+  ]
+}

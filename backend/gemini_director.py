@@ -95,7 +95,13 @@ class GeminiNarrativeDirector:
     Cognitive AI Director powered by Google Gemini API.
     """
 
-    def __init__(self, ground_truth_file: Optional[str] = None, ground_truth_file_map2: Optional[str] = None):
+    def __init__(
+        self,
+        ground_truth_file: Optional[str] = None,
+        ground_truth_file_map2: Optional[str] = None,
+        read_env_file: bool = True,
+    ):
+        self._read_env_file = read_env_file
         base_dir = os.path.dirname(os.path.abspath(__file__))
         if ground_truth_file is None:
             ground_truth_file = os.path.join(base_dir, "data", "map1_ground_truth.json")
@@ -114,47 +120,100 @@ class GeminiNarrativeDirector:
                 "connection_statuses": list(CONNECTION_STATUSES),
             },
         )
-        self.api_key = self._load_api_key()
+        self.api_keys = self._load_api_keys(read_env_file=self._read_env_file)
+        self.api_key = self.api_keys[0] if self.api_keys else ""
+        self._active_key_index = 0
 
-    def _load_api_key(self) -> str:
-        """Loads GEMINI_API_KEY from environment or .env files with multiple fallbacks."""
-        # 1. Try python-dotenv on project root and backend folder
-        try:
-            from dotenv import load_dotenv
+    @staticmethod
+    def _mask_key(key: str) -> str:
+        """Safely masks an API key for logs (e.g. AQ.A...5qsg)."""
+        if not key:
+            return "<empty>"
+        if len(key) <= 8:
+            return "***"
+        return f"{key[:4]}...{key[-4:]}"
+
+    def _load_api_keys(self, read_env_file: Optional[bool] = None) -> List[str]:
+        """Loads all GEMINI_API_KEY* variables from environment or .env files."""
+        if read_env_file is None:
+            read_env_file = getattr(self, "_read_env_file", True)
+
+        env_file_keys: Dict[str, str] = {}
+        if read_env_file:
+            # 1. Try python-dotenv on project root and backend folder
+            try:
+                from dotenv import load_dotenv
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                root_dir = os.path.dirname(base_dir)
+                load_dotenv(os.path.join(root_dir, ".env"), override=False)
+                load_dotenv(os.path.join(base_dir, ".env"), override=False)
+            except Exception:
+                pass
+
+            # 2. Manual fallback parser for .env files to detect GEMINI_API_KEY*
             base_dir = os.path.dirname(os.path.abspath(__file__))
-            root_dir = os.path.dirname(base_dir)
-            load_dotenv(os.path.join(root_dir, ".env"), override=False)
-            load_dotenv(os.path.join(base_dir, ".env"), override=False)
-        except Exception:
-            pass
+            candidate_paths = [
+                os.path.join(os.path.dirname(base_dir), ".env"),
+                os.path.join(base_dir, ".env")
+            ]
+            for p in candidate_paths:
+                if os.path.exists(p):
+                    try:
+                        with open(p, "r", encoding="utf-8") as f:
+                            for line in f:
+                                line = line.strip()
+                                if line and not line.startswith("#") and "=" in line:
+                                    k, v = line.split("=", 1)
+                                    k_clean = k.strip()
+                                    v_clean = v.strip().strip('"').strip("'")
+                                    if (k_clean == "GEMINI_API_KEY" or k_clean.startswith("GEMINI_API_KEY_") or k_clean == "GEMINI_API_KEYS") and v_clean:
+                                        env_file_keys[k_clean] = v_clean
+                                        if k_clean not in os.environ:
+                                            os.environ[k_clean] = v_clean
+                    except Exception:
+                        pass
 
-        key = os.environ.get("GEMINI_API_KEY", "").strip()
-        if key:
-            return key
+        # 3. Collect and deduplicate keys in priority order:
+        # GEMINI_API_KEY first, then GEMINI_API_KEY_1, GEMINI_API_KEY_2, etc.
+        keys: List[str] = []
 
-        # 2. Manual fallback parser for .env
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        candidate_paths = [
-            os.path.join(os.path.dirname(base_dir), ".env"),
-            os.path.join(base_dir, ".env")
+        def _add_key(raw_val: str) -> None:
+            for part in raw_val.replace(";", ",").split(","):
+                token = part.strip()
+                if token and token not in keys:
+                    keys.append(token)
+
+        # Primary key
+        primary = os.environ.get("GEMINI_API_KEY", env_file_keys.get("GEMINI_API_KEY", "")).strip()
+        if primary:
+            _add_key(primary)
+
+        # Additional numbered/named keys
+        all_var_names = set(os.environ.keys()) | set(env_file_keys.keys())
+        extra_names = [
+            name for name in all_var_names
+            if (name.startswith("GEMINI_API_KEY_") or name == "GEMINI_API_KEYS")
         ]
-        for p in candidate_paths:
-            if os.path.exists(p):
-                try:
-                    with open(p, "r", encoding="utf-8") as f:
-                        for line in f:
-                            line = line.strip()
-                            if line and not line.startswith("#") and "=" in line:
-                                k, v = line.split("=", 1)
-                                if k.strip() == "GEMINI_API_KEY":
-                                    val = v.strip().strip('"').strip("'")
-                                    if val:
-                                        os.environ["GEMINI_API_KEY"] = val
-                                        return val
-                except Exception:
-                    pass
 
-        return ""
+        def _sort_key(name: str):
+            parts = name.split("_")
+            if parts[-1].isdigit():
+                return (0, int(parts[-1]))
+            return (1, name)
+
+        extra_names.sort(key=_sort_key)
+
+        for name in extra_names:
+            val = os.environ.get(name, env_file_keys.get(name, "")).strip()
+            if val:
+                _add_key(val)
+
+        return keys
+
+    def _load_api_key(self, read_env_file: Optional[bool] = None) -> str:
+        """Loads primary GEMINI_API_KEY from environment or .env files (backward compatibility)."""
+        keys = self._load_api_keys(read_env_file=read_env_file)
+        return keys[0] if keys else ""
 
     def _load_ground_truth(self, path: str, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if os.path.exists(path):
@@ -168,16 +227,37 @@ class GeminiNarrativeDirector:
     def generate_node_2(self, profile: PlayerProfile, telemetry: TelemetryLog, seed: Optional[int] = None) -> Dict[str, Any]:
         """
         Generates the Node 02 Manifest and Story Briefing/Debriefing based on Map 1 telemetry.
-        Tries Gemini API first; falls back to deterministic heuristic director if unavailable.
+        Tries Gemini API first with key rotation across all available API keys;
+        falls back to deterministic heuristic director if unavailable or all keys exhausted.
         """
-        self.api_key = self._load_api_key()
-        if self.api_key:
-            try:
-                manifest_dict = self._call_gemini(profile, telemetry, seed)
-                if manifest_dict:
-                    return manifest_dict
-            except Exception as e:
-                logger.warning(f"[Director] Gemini API call failed: {e}. Falling back to heuristic director.")
+        self.api_keys = self._load_api_keys(read_env_file=getattr(self, "_read_env_file", True))
+        self.api_key = self.api_keys[0] if self.api_keys else ""
+
+        if self.api_keys:
+            num_keys = len(self.api_keys)
+            start_index = self._active_key_index % num_keys
+
+            for attempt in range(num_keys):
+                curr_idx = (start_index + attempt) % num_keys
+                curr_key = self.api_keys[curr_idx]
+                masked_key = self._mask_key(curr_key)
+
+                try:
+                    manifest_dict = self._call_gemini(profile, telemetry, seed, api_key=curr_key)
+                    if manifest_dict:
+                        self._active_key_index = curr_idx
+                        self.api_key = curr_key
+                        return manifest_dict
+                except Exception as e:
+                    logger.warning(
+                        f"[Director] Gemini API call failed with key {masked_key} (key {curr_idx + 1}/{num_keys}): {e}"
+                    )
+                    if attempt + 1 < num_keys:
+                        logger.info("[Director] Rotating to next available Gemini API key...")
+
+            logger.warning(
+                f"[Director] All {num_keys} Gemini API key(s) failed or hit quota limits. Falling back to heuristic director."
+            )
 
         return self._generate_fallback(profile, telemetry, seed)
 
@@ -232,7 +312,13 @@ class GeminiNarrativeDirector:
             "destroyed_types": destruct_types
         }
 
-    def _call_gemini(self, profile: PlayerProfile, telemetry: TelemetryLog, seed: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    def _call_gemini(
+        self,
+        profile: PlayerProfile,
+        telemetry: TelemetryLog,
+        seed: Optional[int] = None,
+        api_key: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         from google import genai
         from google.genai import types
 
@@ -378,9 +464,11 @@ Generate the complete Director response in the following JSON format:
   ]
 }}
 """
-        client = genai.Client(api_key=self.api_key)
+        effective_key = api_key or self.api_key
+        client = genai.Client(api_key=effective_key)
+        model_name = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model=model_name,
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,

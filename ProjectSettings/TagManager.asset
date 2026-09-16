@@ -9,6 +9,11 @@ TagManager:
   - Vehicle
   - AmmoPickup
   - Barricade
+  - Explosive
+  - NPC
+  - Civilian
+  - Building
+  - Interactable
   layers:
   - Default
   - TransparentFX

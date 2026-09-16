@@ -1,0 +1,47 @@
+{
+  "mission_id": "M02_THE_HIT",
+  "player_id": "player_01",
+  "player_archetype": "BALANCED",
+  "seed": 42,
+  "target": {
+    "name": "Viktor",
+    "location_id": "mid_street",
+    "location_label": "Mid-City Street",
+    "armor": "medium",
+    "health": 100,
+    "movement": "patrol",
+    "is_indoors": false
+  },
+  "guards": {
+    "count": 5,
+    "vision_range": 5.55,
+    "patrol_pattern": "static",
+    "armor": "light",
+    "reaction_speed": 1.0,
+    "label": "5 Guards (Balanced)"
+  },
+  "environment": {
+    "time_of_day": "day",
+    "weather": "overcast",
+    "visibility": 0.75,
+    "ambient_label": "Overcast Day"
+  },
+  "routes": {
+    "primary_route_id": "main_road_north",
+    "primary_label": "Main Road North",
+    "blocked_routes": [],
+    "gps_hint": "Standard approach. Use your judgment."
+  },
+  "profile_stealth_ratio": 0.0,
+  "profile_aggression": 0.171,
+  "profile_destruction_index": 0.0,
+  "profile_vehicle_preference": 0.0,
+  "profile_avg_speed": 0.312,
+  "reasoning": [
+    "BALANCED: Standard target config \u2014 moderate difficulty.",
+    "Guards: count=5, vision=5.55m, reaction=1.0x, armor=light",
+    "Environment: Overcast Day (visibility=0.75)",
+    "Primary route: Main Road North | Blocked: []",
+    "[OK] Invariant check: target location guaranteed reachable via primary route."
+  ]
+}

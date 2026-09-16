@@ -25,10 +25,17 @@ namespace AdaptiveWorld2D.Player
         public GameObject bulletPrefab;
         public Transform firePoint;
 
+        [Header("Dependencies (Phase 4 — assign in Inspector to skip singleton lookup)")]
+        [Tooltip("Assign TelemetryReporter here. When null at Start, falls back to TelemetryReporter.Instance.")]
+        [SerializeField] private TelemetryReporter _telemetryReporter;
+
         private float _lastFireTime = 0f;
 
         private void Start()
         {
+            if (_telemetryReporter == null)
+                _telemetryReporter = TelemetryReporter.Instance;
+
             // Auto-display armed gun sprite if player has pistol
             if (hasPistol && armedSprite != null)
             {
@@ -92,9 +99,9 @@ namespace AdaptiveWorld2D.Player
                     bool wasLethal = enemy.TakeDamage(gunDamage, dir);
                     float dist = Vector2.Distance(origin, hit.point);
 
-                    if (TelemetryReporter.Instance != null)
+                    if (_telemetryReporter != null)
                     {
-                        TelemetryReporter.Instance.ReportCombat(
+                        _telemetryReporter.ReportCombat(
                             "DIRECT_ASSAULT",
                             "pistol",
                             enemy.isTargetBoss ? "target" : "guard",
@@ -131,9 +138,9 @@ namespace AdaptiveWorld2D.Player
                 string style = isStealth ? "STEALTH" : "DIRECT_ASSAULT";
                 string weaponName = isStealth ? "knife" : "fist";
 
-                if (TelemetryReporter.Instance != null)
+                if (_telemetryReporter != null)
                 {
-                    TelemetryReporter.Instance.ReportCombat(
+                    _telemetryReporter.ReportCombat(
                         style,
                         weaponName,
                         enemy.isTargetBoss ? "target" : "guard",

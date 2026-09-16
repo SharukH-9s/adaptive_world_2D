@@ -1,0 +1,50 @@
+{
+  "mission_id": "M02_THE_HIT",
+  "player_id": "player_01",
+  "player_archetype": "GHOST",
+  "seed": 42,
+  "target": {
+    "name": "Viktor",
+    "location_id": "warehouse_interior",
+    "location_label": "Warehouse Interior (tight corridors)",
+    "armor": "medium",
+    "health": 121,
+    "movement": "patrol",
+    "is_indoors": true
+  },
+  "guards": {
+    "count": 5,
+    "vision_range": 9.21,
+    "patrol_pattern": "active",
+    "armor": "light",
+    "reaction_speed": 1.51,
+    "label": "5 Guards (Ghost)"
+  },
+  "environment": {
+    "time_of_day": "night",
+    "weather": "foggy",
+    "visibility": 0.35,
+    "ambient_label": "Foggy Night"
+  },
+  "routes": {
+    "primary_route_id": "alley_network",
+    "primary_label": "Alley Network",
+    "blocked_routes": [
+      "main_road_north",
+      "warehouse_front_entrance"
+    ],
+    "gps_hint": "Direct entry blocked. Approach through south alleys."
+  },
+  "profile_stealth_ratio": 1.0,
+  "profile_aggression": 0.126,
+  "profile_destruction_index": 0.0,
+  "profile_vehicle_preference": 0.0,
+  "profile_avg_speed": 0.138,
+  "reasoning": [
+    "GHOST: Target placed indoors (warehouse). Armor elevated. Stealth route is deliberately congested with guards.",
+    "Guards: count=5, vision=9.21m, reaction=1.51x, armor=light",
+    "Environment: Foggy Night (visibility=0.35)",
+    "Primary route: Alley Network | Blocked: ['main_road_north', 'warehouse_front_entrance']",
+    "[OK] Invariant check: target location guaranteed reachable via primary route."
+  ]
+}

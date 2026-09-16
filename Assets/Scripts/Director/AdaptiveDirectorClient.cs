@@ -1,9 +1,6 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.Text;
 using UnityEngine;
-using UnityEngine.Networking;
 
 namespace AdaptiveWorld2D.Director
 {
@@ -143,23 +140,13 @@ namespace AdaptiveWorld2D.Director
         /// instantiate list fields that are missing or null in JSON, so any downstream
         /// foreach over guards/props/sectors/connections would NullReferenceException.
         /// Call this immediately after JsonUtility.FromJson&lt;MissionManifest&gt;().
+        ///
+        /// Delegates to <see cref="ManifestValidator.Sanitize"/> (Architecture Improvement
+        /// Plan, Phase 2) so this remains the stable compatibility API.
         /// </summary>
         public void Sanitize()
         {
-            if (room_graph == null) return;
-            room_graph.sectors     ??= new System.Collections.Generic.List<SectorConfig>();
-            room_graph.connections ??= new System.Collections.Generic.List<ConnectionConfig>();
-            foreach (var s in room_graph.sectors)
-            {
-                if (s == null) continue;
-                s.guards ??= new System.Collections.Generic.List<GuardEntityConfig>();
-                s.props  ??= new System.Collections.Generic.List<string>();
-            }
-            if (routes != null)
-            {
-                routes.blocked_routes       ??= new System.Collections.Generic.List<string>();
-                routes.reinforced_barricades ??= new System.Collections.Generic.List<string>();
-            }
+            ManifestValidator.Sanitize(this);
         }
     }
 
@@ -181,7 +168,7 @@ namespace AdaptiveWorld2D.Director
 
     /// <summary>Matches the JSON shape returned by /api/telemetry/batch.</summary>
     [Serializable]
-    internal class TelemetryResponse { public string current_archetype; }
+    public class TelemetryResponse { public string current_archetype; }
 
     public class AdaptiveDirectorClient : MonoBehaviour
     {
@@ -199,25 +186,21 @@ namespace AdaptiveWorld2D.Director
         public event Action<string> OnArchetypeChanged;
         public event Action<MissionManifest> OnManifestReceived;
 
-        // ── Disk Cache (§2.3B) ──────────────────────────────────────────────────
-        // Persists the latest manifest JSON to a Temp file so it survives Unity
-        // domain reloads (Editor script recompile). The cache is in Temp/ so it
-        // is never committed to version control but persists across Play sessions
-        // within a single Editor launch.
-        private const string CACHE_PATH = "Temp/AdaptiveWorld_LatestManifest.json";
+        // ── Phase 5 Extracted Services ──────────────────────────────────────────
+        private readonly TelemetryEventQueue _eventQueue = new TelemetryEventQueue();
+        private DirectorTransport _transport;
+        private float _flushTimer = 0f;
+
+        public TelemetryEventQueue EventQueue => _eventQueue;
+        public DirectorTransport Transport => _transport ??= new DirectorTransport(apiBaseUrl);
+
+        // ── Disk Cache (§2.3B / Phase 5 ManifestCache Delegation) ────────────────
+        public const string CACHE_PATH = ManifestCache.DEFAULT_CACHE_PATH;
 
         /// <summary>Writes the latest manifest JSON to disk so it survives domain reloads.</summary>
         public static void CacheManifestToDisk(string json)
         {
-            try
-            {
-                System.IO.File.WriteAllText(CACHE_PATH, json);
-                Debug.Log($"[AdaptiveDirector] Manifest cached to {CACHE_PATH}");
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[AdaptiveDirector] Could not write manifest cache: {ex.Message}");
-            }
+            ManifestCache.SaveToDisk(json, CACHE_PATH);
         }
 
         /// <summary>
@@ -226,33 +209,15 @@ namespace AdaptiveWorld2D.Director
         /// </summary>
         public static MissionManifest LoadCachedManifest()
         {
-            try
-            {
-                if (System.IO.File.Exists(CACHE_PATH))
-                {
-                    string json = System.IO.File.ReadAllText(CACHE_PATH);
-                    var m = JsonUtility.FromJson<MissionManifest>(json);
-                    m?.Sanitize();
-                    if (m != null)
-                        Debug.Log($"[AdaptiveDirector] Loaded manifest from disk cache (archetype={m.player_archetype}).");
-                    return m;
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[AdaptiveDirector] Failed to load disk cache: {ex.Message}");
-            }
-            return null;
+            return ManifestCache.LoadFromDisk(CACHE_PATH);
         }
         // ────────────────────────────────────────────────────────────────────────
-
-        private List<string> _rawEventsQueue = new List<string>();
-        private float _flushTimer = 0f;
 
         private void Awake()
         {
             if (Instance != null && Instance != this) { Destroy(this); return; }
             Instance = this;
+            _transport = new DirectorTransport(apiBaseUrl);
             UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
             UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
         }
@@ -267,34 +232,7 @@ namespace AdaptiveWorld2D.Director
         private static void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene,
                                           UnityEngine.SceneManagement.LoadSceneMode mode)
         {
-            bool isMap2 = !string.IsNullOrEmpty(scene.name) &&
-                          scene.name.IndexOf("Map2", StringComparison.OrdinalIgnoreCase) >= 0;
-            if (isMap2)
-            {
-#if UNITY_2023_1_OR_NEWER
-                WorldManifestApplier applier = UnityEngine.Object.FindAnyObjectByType<WorldManifestApplier>();
-#else
-                WorldManifestApplier applier = UnityEngine.Object.FindObjectOfType<WorldManifestApplier>();
-#endif
-                if (applier != null)
-                    applier.BootstrapForMap2(scene);
-                else
-                    Debug.LogWarning("[AdaptiveDirector] Map2 loaded but no WorldManifestApplier was found.");
-                return;
-            }
-
-            latestManifest = null;
-            try
-            {
-                if (System.IO.File.Exists(CACHE_PATH))
-                    System.IO.File.Delete(CACHE_PATH);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[AdaptiveDirector] Could not clear manifest cache on fresh Map1 load: {ex.Message}");
-            }
-
-            Debug.Log("[AdaptiveDirector] Fresh non-Map2 scene loaded; cleared previous Map2 manifest.");
+            DirectorSessionCoordinator.HandleSceneLoaded(scene, mode, () => latestManifest = null);
         }
 
         private void Update()
@@ -305,7 +243,7 @@ namespace AdaptiveWorld2D.Director
             if (_flushTimer >= flushInterval)
             {
                 _flushTimer = 0f;
-                if (_rawEventsQueue.Count > 0)
+                if (_eventQueue.Count > 0)
                 {
                     FlushQueue();
                 }
@@ -314,96 +252,71 @@ namespace AdaptiveWorld2D.Director
 
         public void QueueEvent(string eventType, string jsonData)
         {
-            string ts = Time.time.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
-            string item = "{\"event_type\":\"" + eventType + "\",\"timestamp_s\":" + ts + ",\"data\":" + jsonData + "}";
-            _rawEventsQueue.Add(item);
+            _eventQueue.Enqueue(eventType, jsonData);
         }
 
         public void FlushQueue()
         {
-            if (_rawEventsQueue.Count == 0) return;
+            string jsonPayload = _eventQueue.DequeueBatchPayload();
+            if (string.IsNullOrEmpty(jsonPayload)) return;
 
-            List<string> toSend = new List<string>(_rawEventsQueue);
-            _rawEventsQueue.Clear();
-
-            string jsonPayload = "{\"events\":[" + string.Join(",", toSend) + "]}";
-            StartCoroutine(PostTelemetryCoroutine(jsonPayload));
+            EnsureTransport();
+            StartCoroutine(_transport.PostTelemetryBatch(jsonPayload, OnTelemetrySuccess, OnTelemetryError));
         }
 
-        private IEnumerator PostTelemetryCoroutine(string jsonPayload)
+        private void OnTelemetrySuccess(string responseText)
         {
-            string url = apiBaseUrl + "/api/telemetry/batch";
-            using (UnityWebRequest req = new UnityWebRequest(url, "POST"))
+            var resp = DirectorResponseParser.ParseTelemetryResponse(responseText);
+            if (resp != null && !string.IsNullOrEmpty(resp.current_archetype) && resp.current_archetype != currentArchetype)
             {
-                byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonPayload);
-                req.uploadHandler = new UploadHandlerRaw(bodyRaw);
-                req.downloadHandler = new DownloadHandlerBuffer();
-                req.SetRequestHeader("Content-Type", "application/json");
-
-                yield return req.SendWebRequest();
-
-                if (req.result == UnityWebRequest.Result.Success)
-                {
-                    var resp = JsonUtility.FromJson<TelemetryResponse>(req.downloadHandler.text);
-                    if (resp != null && !string.IsNullOrEmpty(resp.current_archetype) && resp.current_archetype != currentArchetype)
-                    {
-                        currentArchetype = resp.current_archetype;
-                        OnArchetypeChanged?.Invoke(currentArchetype);
-                        Debug.Log($"[AdaptiveDirector] Archetype updated: {currentArchetype}");
-                    }
-                }
-                else
-                {
-                    Debug.LogWarning($"[AdaptiveDirector] Telemetry flush failed: {req.error}");
-                }
+                currentArchetype = resp.current_archetype;
+                OnArchetypeChanged?.Invoke(currentArchetype);
+                Debug.Log($"[AdaptiveDirector] Archetype updated: {currentArchetype}");
             }
+        }
+
+        private void OnTelemetryError(string error)
+        {
+            Debug.LogWarning($"[AdaptiveDirector] Telemetry flush failed: {error}");
         }
 
         public void RequestMission2Manifest(int seed = 42, Action<MissionManifest> callback = null)
         {
-            StartCoroutine(SolveMissionCoroutine(seed, callback));
+            EnsureTransport();
+            StartCoroutine(_transport.PostMissionSolve(seed,
+                json => HandleMissionSolveSuccess(json, callback),
+                error => Debug.LogError($"[AdaptiveDirector] Failed to solve mission: {error}")));
         }
 
-        private IEnumerator SolveMissionCoroutine(int seed, Action<MissionManifest> callback)
+        private void HandleMissionSolveSuccess(string json, Action<MissionManifest> callback)
         {
-            string url = apiBaseUrl + "/api/mission/solve";
-            string body = "{\"seed\":" + seed + "}";
+            MissionManifest manifest = DirectorResponseParser.ParseMissionManifest(json);
+            if (manifest == null) return;
 
-            using (UnityWebRequest req = new UnityWebRequest(url, "POST"))
+            latestManifest   = manifest;
+            currentArchetype = manifest.player_archetype;
+
+            // Persist to disk so domain reloads don't lose the manifest (§2.3B)
+            ManifestCache.SaveToDisk(json, CACHE_PATH);
+
+            Debug.Log($"[AdaptiveDirector] Received M2 Manifest! Target at {manifest.target?.location_label}, Armor: {manifest.target?.armor}");
+            LogRoomGraph(manifest.room_graph);
+
+            // Isolated multi-cast dispatch (§2.3C): a subscriber exception
+            // will not halt remaining subscribers.
+            DispatchManifest(manifest);
+            callback?.Invoke(manifest);
+        }
+
+        private void EnsureTransport()
+        {
+            if (_transport == null)
             {
-                byte[] bodyRaw = Encoding.UTF8.GetBytes(body);
-                req.uploadHandler = new UploadHandlerRaw(bodyRaw);
-                req.downloadHandler = new DownloadHandlerBuffer();
-                req.SetRequestHeader("Content-Type", "application/json");
-
-                yield return req.SendWebRequest();
-
-                if (req.result == UnityWebRequest.Result.Success)
-                {
-                    string json = req.downloadHandler.text;
-                    MissionManifest manifest = JsonUtility.FromJson<MissionManifest>(json);
-
-                    // Sanitize null lists immediately after deserialization (§2.3A)
-                    manifest?.Sanitize();
-
-                    latestManifest   = manifest;
-                    currentArchetype = manifest.player_archetype;
-
-                    // Persist to disk so domain reloads don't lose the manifest (§2.3B)
-                    CacheManifestToDisk(json);
-
-                    Debug.Log($"[AdaptiveDirector] Received M2 Manifest! Target at {manifest.target.location_label}, Armor: {manifest.target.armor}");
-                    LogRoomGraph(manifest.room_graph);
-
-                    // Isolated multi-cast dispatch (§2.3C): a subscriber exception
-                    // will not halt remaining subscribers.
-                    DispatchManifest(manifest);
-                    callback?.Invoke(manifest);
-                }
-                else
-                {
-                    Debug.LogError($"[AdaptiveDirector] Failed to solve mission: {req.error}");
-                }
+                _transport = new DirectorTransport(apiBaseUrl);
+            }
+            else if (_transport.ApiBaseUrl != apiBaseUrl)
+            {
+                _transport.ApiBaseUrl = apiBaseUrl;
             }
         }
 
@@ -460,22 +373,10 @@ namespace AdaptiveWorld2D.Director
 
         public void ResetDirectorSession(Action onDone = null)
         {
-            StartCoroutine(ResetCoroutine(onDone));
-        }
-
-        private IEnumerator ResetCoroutine(Action onDone)
-        {
-            string url = apiBaseUrl + "/api/reset";
-            using (UnityWebRequest req = new UnityWebRequest(url, "POST"))
-            {
-                byte[] bodyRaw = Encoding.UTF8.GetBytes("{}");
-                req.uploadHandler = new UploadHandlerRaw(bodyRaw);
-                req.downloadHandler = new DownloadHandlerBuffer();
-                req.SetRequestHeader("Content-Type", "application/json");
-
-                yield return req.SendWebRequest();
-                onDone?.Invoke();
-            }
+            EnsureTransport();
+            StartCoroutine(_transport.PostReset(
+                () => onDone?.Invoke(),
+                error => Debug.LogWarning($"[AdaptiveDirector] Reset failed: {error}")));
         }
     }
 }

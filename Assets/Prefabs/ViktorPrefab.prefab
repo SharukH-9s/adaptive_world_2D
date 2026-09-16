@@ -252,6 +252,8 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 0
   sectorId: 
+  _targetPlayer: {fileID: 0}
+  _missionManager: {fileID: 0}
 --- !u!114 &189705084212023961
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -275,3 +277,4 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 1
   alertIconObject: {fileID: 0}
+  _playerTransform: {fileID: 0}

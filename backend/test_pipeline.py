@@ -13,7 +13,7 @@ if sys.platform == "win32":
     except: pass
 
 import httpx, json
-from backend.server import app
+from backend.api.server import app
 from fastapi.testclient import TestClient
 from backend.target_solver import RoomGraphManifest
 

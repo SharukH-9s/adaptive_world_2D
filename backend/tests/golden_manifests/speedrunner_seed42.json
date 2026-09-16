@@ -1,0 +1,50 @@
+{
+  "mission_id": "M02_THE_HIT",
+  "player_id": "player_01",
+  "player_archetype": "SPEEDRUNNER",
+  "seed": 42,
+  "target": {
+    "name": "Viktor",
+    "location_id": "far_docks",
+    "location_label": "Dockyard (far end of map)",
+    "armor": "light",
+    "health": 81,
+    "movement": "erratic",
+    "is_indoors": false
+  },
+  "guards": {
+    "count": 2,
+    "vision_range": 6.78,
+    "patrol_pattern": "static",
+    "armor": "light",
+    "reaction_speed": 1.2,
+    "label": "2 Guards (Speedrunner)"
+  },
+  "environment": {
+    "time_of_day": "dusk",
+    "weather": "overcast",
+    "visibility": 0.6,
+    "ambient_label": "Dusk Overcast"
+  },
+  "routes": {
+    "primary_route_id": "alley_network",
+    "primary_label": "Alley Network (cars removed)",
+    "blocked_routes": [
+      "main_road_north",
+      "highway_east"
+    ],
+    "gps_hint": "No vehicles available. Head through the alleys on foot."
+  },
+  "profile_stealth_ratio": 1.0,
+  "profile_aggression": 0.0,
+  "profile_destruction_index": 0.0,
+  "profile_vehicle_preference": 1.0,
+  "profile_avg_speed": 0.969,
+  "reasoning": [
+    "SPEEDRUNNER: Target placed at far docks. Cars removed from primary roads. Player must traverse on foot.",
+    "Guards: count=2, vision=6.78m, reaction=1.2x, armor=light",
+    "Environment: Dusk Overcast (visibility=0.6)",
+    "Primary route: Alley Network (cars removed) | Blocked: ['main_road_north', 'highway_east']",
+    "[OK] Invariant check: target location guaranteed reachable via primary route."
+  ]
+}

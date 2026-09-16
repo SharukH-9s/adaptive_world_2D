@@ -20,6 +20,10 @@ namespace AdaptiveWorld2D.World
         [Header("State")]
         public bool isDestroyed = false;
 
+        [Header("Dependencies (Phase 4 — assign in Inspector to skip singleton lookup)")]
+        [Tooltip("Assign TelemetryReporter here. When null at Start, falls back to TelemetryReporter.Instance.")]
+        [SerializeField] private TelemetryReporter _telemetryReporter;
+
         private SpriteRenderer _sr;
         private Collider2D _col;
 
@@ -29,6 +33,12 @@ namespace AdaptiveWorld2D.World
             _col = GetComponent<Collider2D>();
             currentHealth = maxHealth;
             if (intactSprite != null && _sr != null) _sr.sprite = intactSprite;
+        }
+
+        private void Start()
+        {
+            if (_telemetryReporter == null)
+                _telemetryReporter = TelemetryReporter.Instance;
         }
 
         public void DamageWall(int damage)
@@ -82,9 +92,9 @@ namespace AdaptiveWorld2D.World
             Debug.Log($"[DestructibleWall] Wall {wallId} destroyed!");
 
             // Report telemetry
-            if (TelemetryReporter.Instance != null)
+            if (_telemetryReporter != null)
             {
-                TelemetryReporter.Instance.ReportDestruction("WALL_BREAK", wallId);
+                _telemetryReporter.ReportDestruction("WALL_BREAK", wallId);
             }
         }
 

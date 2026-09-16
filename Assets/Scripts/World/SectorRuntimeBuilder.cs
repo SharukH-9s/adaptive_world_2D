@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 using AdaptiveWorld2D.Director;
 
@@ -33,11 +32,6 @@ namespace AdaptiveWorld2D.World
             { "NW", new Vector2(-20f, 15f) }, { "NC", new Vector2(0f, 15f) }, { "NE", new Vector2(20f, 15f) },
             { "MW", new Vector2(-20f,  0f) }, { "MC", new Vector2(0f,  0f) }, { "ME", new Vector2(20f,  0f) },
             { "SW", new Vector2(-20f,-15f) }, { "SC", new Vector2(0f,-15f) }, { "SE", new Vector2(20f,-15f) },
-        };
-
-        private static readonly HashSet<string> ValidStatuses = new HashSet<string>
-        {
-            "open", "barricaded_wire_fence", "barricaded_concrete", "walled_off"
         };
 
         public static GameObject Build(RoomGraphManifest roomGraph)
@@ -103,38 +97,14 @@ namespace AdaptiveWorld2D.World
             }
         }
 
+        /// <summary>
+        /// Delegates to <see cref="RoomGraphValidator.Validate"/> (Architecture Improvement
+        /// Plan, Phase 2). Kept as a private redirect so <see cref="Build"/>'s call site and
+        /// logging behavior remain unchanged.
+        /// </summary>
         private static List<string> Validate(RoomGraphManifest rg)
         {
-            var errors = new List<string>();
-
-            if (rg.sectors == null || rg.sectors.Count != 9)
-            {
-                errors.Add($"Expected 9 sectors, got {(rg.sectors != null ? rg.sectors.Count : 0)}.");
-            }
-            else
-            {
-                var ids = new HashSet<string>(rg.sectors.Select(s => s.id));
-                var expected = new HashSet<string>(SectorCoords.Keys);
-                if (!ids.SetEquals(expected))
-                    errors.Add($"Sector id mismatch. Expected [{string.Join(",", expected)}], got [{string.Join(",", ids)}].");
-            }
-
-            if (rg.connections == null || rg.connections.Count != 12)
-            {
-                errors.Add($"Expected 12 connections, got {(rg.connections != null ? rg.connections.Count : 0)}.");
-            }
-            else
-            {
-                foreach (var c in rg.connections)
-                    if (!ValidStatuses.Contains(c.status))
-                        errors.Add($"Connection {c.from_sector}->{c.to_sector} has invalid status '{c.status}'.");
-            }
-
-            if (string.IsNullOrEmpty(rg.target_sector)) errors.Add("target_sector is empty.");
-            if (string.IsNullOrEmpty(rg.player_spawn_sector)) errors.Add("player_spawn_sector is empty.");
-            if (string.IsNullOrEmpty(rg.extraction_sector)) errors.Add("extraction_sector is empty.");
-
-            return errors;
+            return RoomGraphValidator.Validate(rg);
         }
 
         private static void BuildModule(Transform parent, string module, Vector3 center)
