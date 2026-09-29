@@ -314,13 +314,12 @@ class GeminiNarrativeDirector:
 
     def _call_gemini(
         self,
-        profile: PlayerProfile,
-        telemetry: TelemetryLog,
-        seed: Optional[int] = None,
-        api_key: Optional[str] = None,
-    ) -> Optional[Dict[str, Any]]:
+        profile,
+        telemetry,
+        seed=None,
+        api_key=None,
+    ):
         from google import genai
-        from google.genai import types
 
         digest = self._build_telemetry_digest(profile, telemetry)
         gt_summary = {
@@ -337,154 +336,373 @@ class GeminiNarrativeDirector:
             "connection_statuses": self.ground_truth_map2.get("connection_statuses", list(CONNECTION_STATUSES)),
         }
 
-        system_instruction = f"""
-You are the Cognitive Narrative Director of the game 'AdaptiveWorld2D'.
-The game follows a 10-Node Underworld Crime Story Spine.
-Node 01 is 'Rock Bottom' (slum survival, purchasing first weapon, escaping to extraction).
-Node 02 is 'First Blood' (the player's first formal syndicate contract: eliminate Viktor, a rival lieutenant).
+        system_instruction = (
+            "You are the Cognitive Narrative Director of the game 'AdaptiveWorld2D'.\n"
+            "The game follows a 10-Node Underworld Crime Story Spine.\n"
+            "Node 01 is 'Rock Bottom' (slum survival, purchasing first weapon, escaping to extraction).\n"
+            "Node 02 is 'First Blood' (the player's first formal syndicate contract: eliminate Viktor, a rival lieutenant).\n\n"
+            "You receive:\n"
+            "1. Map 1 Ground Truth (layout, sectors, choke points, guard patrols, vehicles, destructible fences/walls, fuel barrels).\n"
+            "2. The Player's actual telemetry from Node 01 (kills, combat style, route surfaces, vehicle usage, destruction events).\n\n"
+            "Your Job:\n"
+            "1. Correlate the player's telemetry against the physical geometry of Map 1:\n"
+            "   - Did they run the main Boulevard, or sneak the South Alleys?\n"
+            "   - Did they steal a vehicle (Sports Car / Police Cruiser) or traverse on foot?\n"
+            "   - Did they blow up fuel barrels and breach concrete walls, or avoid alarms?\n"
+            "   - Did they kill innocent civilians, patrol cops, or rival gang thugs?\n"
+            "2. Deduce their true Psychological Archetype (GHOST, WRECKING_BALL, SPEEDRUNNER, AGGRESSOR, TACTICIAN, or BALANCED).\n"
+            "3. Write a visceral Underworld Handler radio debriefing assessing their performance in Map 1.\n"
+            "4. Advance the story to Node 02 ('First Blood'): write the mission briefing and dynamic objective text.\n"
+            "5. Output the spatial manifest for Map 2 that strategically adapts to challenge or exploit their archetype:\n"
+            "   - Target location must be one of: 'warehouse_interior', 'open_plaza', 'far_docks', 'fortified_building', 'mid_street'.\n"
+            "   - Target armor: 'none', 'light', 'medium', 'heavy', 'reinforced'.\n"
+            "   - Guards count: 3 to 10. Vision: 4.0 to 12.0. Reaction: 0.8 to 2.5.\n"
+            "   - Routes: primary_route ('main_road', 'alley_south', 'highway_east'), blocked_routes "
+            "(subset of ['main_road_north', 'alley_south', 'highway_east', 'warehouse_front_entrance']), cars_available (boolean).\n"
+            "   - Environment: time_of_day ('day', 'dusk', 'night'), weather ('clear', 'fog', 'rain'), "
+            "visibility (0.3 to 1.0), ambient_light (0.2 to 1.0).\n\n"
+            "Return strictly valid JSON conforming to the requested schema.\n"
+        )
 
-You receive:
-1. Map 1 Ground Truth (layout, sectors, choke points, guard patrols, vehicles, destructible fences/walls, fuel barrels).
-2. The Player's actual telemetry from Node 01 (kills, combat style, route surfaces, vehicle usage, destruction events).
-
-Your Job:
-1. Correlate the player's telemetry against the physical geometry of Map 1:
-   - Did they run the main Boulevard, or sneak the South Alleys?
-   - Did they steal a vehicle (Sports Car / Police Cruiser) or traverse on foot?
-   - Did they blow up fuel barrels and breach concrete walls, or avoid alarms?
-   - Did they kill innocent civilians, patrol cops, or rival gang thugs?
-2. Deduce their true Psychological Archetype (GHOST, WRECKING_BALL, SPEEDRUNNER, AGGRESSOR, TACTICIAN, or BALANCED).
-3. Write a visceral Underworld Handler radio debriefing assessing their performance in Map 1.
-4. Advance the story to Node 02 ('First Blood'): write the mission briefing and dynamic objective text.
-5. Output the spatial manifest for Map 2 that strategically adapts to challenge or exploit their archetype:
-   - Target location must be one of: 'warehouse_interior', 'open_plaza', 'far_docks', 'fortified_building', 'mid_street'.
-   - Target armor: 'none', 'light', 'medium', 'heavy', 'reinforced'.
-   - Guards count: 3 to 10. Vision: 4.0 to 12.0. Reaction: 0.8 to 2.5.
-   - Routes: primary_route ('main_road', 'alley_south', 'highway_east'), blocked_routes (subset of ['main_road_north', 'alley_south', 'highway_east', 'warehouse_front_entrance']), cars_available (boolean).
-   - Environment: time_of_day ('day', 'dusk', 'night'), weather ('clear', 'fog', 'rain'), visibility (0.3 to 1.0), ambient_light (0.2 to 1.0).
-6. Additionally, output a `room_graph`: a full 9-sector tactical blueprint of Map 2, laid out on the
-   3x3 grid supplied to you in MAP 2 SPATIAL GRID below.
-   - `sectors` MUST be a JSON ARRAY (not an object) with EXACTLY 9 entries, one per sector id
-     (NW, NC, NE, MW, MC, ME, SW, SC, SE), each with its exact `center_x`/`center_y` from the grid.
-   - Each sector's `module` must be one of the provided `modules`, chosen to match the archetype's
-     narrative (e.g. GHOST favors SLUM_ALLEYWAYS/WAREHOUSE_INTERIOR; WRECKING_BALL favors
-     INDUSTRIAL_DEPOT/FORTIFIED_PLAZA; SPEEDRUNNER favors URBAN_HIGHWAY/WATERFRONT_DOCKS;
-     AGGRESSOR favors URBAN_HIGHWAY/SECURITY_COMPOUND). Use OPEN_STREET/VACANT_LOT as filler
-     for thematically-unassigned sectors.
-   - `connections` MUST contain EXACTLY the 12 adjacency pairs listed in `sector_adjacency` below,
-     each assigned one of the provided `connection_statuses`.
-   - `target_sector`, `player_spawn_sector`, and `extraction_sector` must each be a distinct sector id.
-   - CRITICAL INVARIANT: a path using only 'open' or 'barricaded_*' edges (never 'walled_off') MUST
-     exist from `player_spawn_sector` to `target_sector`, and from `target_sector` to
-     `extraction_sector`. Use 'barricaded_*' statuses for chokepoints on the intended path, and
-     reserve 'walled_off' only for edges meant to force the player around.
-
-Return strictly valid JSON conforming to the requested schema.
-"""
-
-        prompt = f"""
-MAP 1 GROUND TRUTH:
-{json.dumps(gt_summary, indent=2)}
-
-MAP 2 SPATIAL GRID (destination -- you must populate this exact 3x3 sector grid):
-{json.dumps(map2_layout, indent=2)}
-
-PLAYER RUN TELEMETRY DIGEST:
-{json.dumps(digest, indent=2)}
-
-STORY NODE:
-Current: NODE_01 (Rock Bottom) -> Next: NODE_02 (First Blood)
-
-Generate the complete Director response in the following JSON format:
-{{
-  "mission_id": 2,
-  "mission_title": "NODE 02: First Blood",
-  "player_archetype": "<GHOST|WRECKING_BALL|SPEEDRUNNER|AGGRESSOR|TACTICIAN|BALANCED>",
-  "psychological_deduction": "<1-2 sentences analyzing their psychological fingerprint based on Map 1 choices>",
-  "narrative_debriefing": "<Handler's debriefing analyzing their Map 1 actions in gritty underworld dialogue>",
-  "mission_briefing": "<Handler's mission contract briefing for Node 02>",
-  "target": {{
-    "name": "Viktor",
-    "location_id": "<warehouse_interior|open_plaza|far_docks|fortified_building|mid_street>",
-    "location_label": "<Human readable location>",
-    "armor": "<none|light|medium|heavy|reinforced>",
-    "health": <int 80 to 250>,
-    "movement": "<stationary|patrol|erratic>",
-    "is_indoors": <bool>
-  }},
-  "guards": {{
-    "count": <int 3 to 10>,
-    "vision_range": <float 4.0 to 12.0>,
-    "reaction_speed": <float 0.8 to 2.5>,
-    "hearing_range": <float 6.0 to 15.0>,
-    "armored": <bool>,
-    "high_alert": <bool>,
-    "patrol_pattern": "<static|active|random>"
-  }},
-  "environment": {{
-    "time_of_day": "<day|dusk|night>",
-    "weather": "<clear|fog|rain>",
-    "visibility": <float 0.3 to 1.0>,
-    "ambient_light": <float 0.2 to 1.0>,
-    "ambient_label": "<Short descriptive label>"
-  }},
-  "routes": {{
-    "primary_route": "<main_road|alley_south|highway_east>",
-    "primary_route_id": "<main_road|alley_south|highway_east>",
-    "primary_label": "<Route Name>",
-    "blocked_routes": ["<subset of: main_road_north, alley_south, highway_east, warehouse_front_entrance>"],
-    "reinforced_barricades": [],
-    "cars_available": <bool>
-  }},
-  "room_graph": {{
-    "sectors": [
-      {{
-        "id": "<NW|NC|NE|MW|MC|ME|SW|SC|SE>",
-        "module": "<one of the 9 modules from MAP 2 SPATIAL GRID>",
-        "center_x": <float, must exactly match sector_grid_coords for this id>,
-        "center_y": <float, must exactly match sector_grid_coords for this id>,
-        "guards": [
-          {{ "sector_id": "<same id>", "offset_x": <float -3 to 3>, "offset_y": <float -3 to 3>, "role": "<patrol|sentry|bodyguard>", "armored": <bool> }}
-        ],
-        "props": ["<fuel_barrel|crate|car>"]
-      }}
-      // ... exactly 9 entries total, one per sector id, all ids unique and covering the full grid
-    ],
-    "connections": [
-      {{ "from_sector": "<id>", "to_sector": "<adjacent id>", "status": "<one of connection_statuses>" }}
-      // ... exactly the 12 pairs listed in sector_adjacency above, no more, no fewer
-    ],
-    "target_sector": "<sector id where Viktor is located -- should thematically match target.location_id>",
-    "player_spawn_sector": "<sector id, distinct from target_sector>",
-    "extraction_sector": "<sector id, distinct from player_spawn_sector>"
-  }},
-  "reasoning": [
-    "<reason 1>",
-    "<reason 2>"
-  ]
-}}
-"""
         effective_key = api_key or self.api_key
         client = genai.Client(api_key=effective_key)
-        model_name = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
-        response = client.models.generate_content(
-            model=model_name,
+        model_name = __import__("os").environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+
+        # ── Pass 1: Narrative + Stats ────────────────────────────────────────
+        pass1_dict = self._call_gemini_pass1(
+            client, model_name, system_instruction, gt_summary, digest
+        )
+        if not pass1_dict:
+            return None
+        logger.info(
+            "[Director] Pass 1 complete: archetype=%s, target=%s",
+            pass1_dict.get("player_archetype"),
+            pass1_dict.get("target", {}).get("location_id"),
+        )
+
+        # ── Pass 2: Room Graph (Pass 1 context injected) ─────────────────────
+        pass2_dict = None
+        try:
+            pass2_dict = self._call_gemini_pass2(
+                client, model_name, pass1_dict, map2_layout, seed
+            )
+            if pass2_dict and pass2_dict.get("room_graph"):
+                logger.info("[Director] Pass 2 complete: room_graph generated.")
+        except Exception as e:
+            logger.warning(
+                "[Director] Pass 2 room_graph generation failed (%s); will synthesize via archetype template.",
+                e,
+            )
+
+        # ── Merge and validate ───────────────────────────────────────────────
+        manifest_json = pass1_dict
+        manifest_json["room_graph"] = pass2_dict.get("room_graph") if pass2_dict else None
+        archetype = manifest_json.get("player_archetype", profile.archetype())
+        self._validate_and_repair_room_graph(manifest_json, archetype, seed)
+        if pass2_dict and pass2_dict.get("room_graph"):
+            logger.info(
+                "[Director] Successfully generated Node 02 via Gemini (two-pass): Archetype=%s",
+                manifest_json.get("player_archetype"),
+            )
+        else:
+            logger.info(
+                "[Director] Successfully generated Node 02 via Gemini (Pass 1 narrative + template room_graph): Archetype=%s",
+                manifest_json.get("player_archetype"),
+            )
+        return manifest_json
+
+    # ── Schema constants ─────────────────────────────────────────────────────
+
+    _SECTOR_ID_ENUM   = ["NW", "NC", "NE", "MW", "MC", "ME", "SW", "SC", "SE"]
+    _MODULE_ENUM      = [
+        "WAREHOUSE_INTERIOR", "FORTIFIED_PLAZA", "SLUM_ALLEYWAYS", "URBAN_HIGHWAY",
+        "INDUSTRIAL_DEPOT", "WATERFRONT_DOCKS", "SECURITY_COMPOUND",
+        "OPEN_STREET", "VACANT_LOT",
+    ]
+    _STATUS_ENUM      = ["open", "barricaded_wire_fence", "barricaded_concrete", "walled_off"]
+    _ROLE_ENUM        = ["patrol", "sentry", "bodyguard"]
+    _PROP_ENUM        = ["fuel_barrel", "crate", "car"]
+    _ARCHETYPE_ENUM   = ["GHOST", "WRECKING_BALL", "SPEEDRUNNER", "AGGRESSOR", "TACTICIAN", "BALANCED"]
+    _LOCATION_ID_ENUM = ["warehouse_interior", "open_plaza", "far_docks", "fortified_building", "mid_street"]
+    _ARMOR_ENUM       = ["none", "light", "medium", "heavy", "reinforced"]
+    _MOVEMENT_ENUM    = ["stationary", "patrol", "erratic"]
+    _TOD_ENUM         = ["day", "dusk", "night"]
+    _WEATHER_ENUM     = ["clear", "fog", "rain"]
+    _PATROL_ENUM      = ["static", "active", "random"]
+    _ROUTE_ENUM       = ["main_road", "alley_south", "highway_east"]
+    _BLOCKED_ENUM     = ["main_road_north", "alley_south", "highway_east", "warehouse_front_entrance"]
+
+    @classmethod
+    def _pass1_schema(cls):
+        """response_schema for Pass 1: narrative + mission stats (no room_graph)."""
+        return {
+            "type": "OBJECT",
+            "properties": {
+                "mission_id":              {"type": "INTEGER"},
+                "mission_title":           {"type": "STRING"},
+                "player_archetype":        {"type": "STRING", "enum": cls._ARCHETYPE_ENUM},
+                "psychological_deduction": {"type": "STRING"},
+                "narrative_debriefing":    {"type": "STRING"},
+                "mission_briefing":        {"type": "STRING"},
+                "target": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "name":           {"type": "STRING"},
+                        "location_id":    {"type": "STRING", "enum": cls._LOCATION_ID_ENUM},
+                        "location_label": {"type": "STRING"},
+                        "armor":          {"type": "STRING", "enum": cls._ARMOR_ENUM},
+                        "health":         {"type": "INTEGER"},
+                        "movement":       {"type": "STRING", "enum": cls._MOVEMENT_ENUM},
+                        "is_indoors":     {"type": "BOOLEAN"},
+                    },
+                    "required": ["name", "location_id", "location_label", "armor",
+                                 "health", "movement", "is_indoors"],
+                },
+                "guards": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "count":          {"type": "INTEGER"},
+                        "vision_range":   {"type": "NUMBER"},
+                        "reaction_speed": {"type": "NUMBER"},
+                        "hearing_range":  {"type": "NUMBER"},
+                        "armored":        {"type": "BOOLEAN"},
+                        "high_alert":     {"type": "BOOLEAN"},
+                        "patrol_pattern": {"type": "STRING", "enum": cls._PATROL_ENUM},
+                    },
+                    "required": ["count", "vision_range", "reaction_speed", "hearing_range",
+                                 "armored", "high_alert", "patrol_pattern"],
+                },
+                "environment": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "time_of_day":   {"type": "STRING", "enum": cls._TOD_ENUM},
+                        "weather":       {"type": "STRING", "enum": cls._WEATHER_ENUM},
+                        "visibility":    {"type": "NUMBER"},
+                        "ambient_light": {"type": "NUMBER"},
+                        "ambient_label": {"type": "STRING"},
+                    },
+                    "required": ["time_of_day", "weather", "visibility", "ambient_light", "ambient_label"],
+                },
+                "routes": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "primary_route":         {"type": "STRING", "enum": cls._ROUTE_ENUM},
+                        "primary_route_id":      {"type": "STRING", "enum": cls._ROUTE_ENUM},
+                        "primary_label":         {"type": "STRING"},
+                        "blocked_routes":        {"type": "ARRAY", "items": {"type": "STRING", "enum": cls._BLOCKED_ENUM}},
+                        "reinforced_barricades": {"type": "ARRAY", "items": {"type": "STRING"}},
+                        "cars_available":        {"type": "BOOLEAN"},
+                    },
+                    "required": ["primary_route", "primary_route_id", "primary_label",
+                                 "blocked_routes", "reinforced_barricades", "cars_available"],
+                },
+                "reasoning": {"type": "ARRAY", "items": {"type": "STRING"}},
+            },
+            "required": [
+                "mission_id", "mission_title", "player_archetype",
+                "psychological_deduction", "narrative_debriefing", "mission_briefing",
+                "target", "guards", "environment", "routes", "reasoning",
+            ],
+        }
+
+    @classmethod
+    def _pass2_schema(cls):
+        """response_schema for Pass 2: room_graph only. Constrains every enum at sampler level."""
+        return {
+            "type": "OBJECT",
+            "properties": {
+                "room_graph": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "sectors": {
+                            "type": "ARRAY",
+                            "items": {
+                                "type": "OBJECT",
+                                "properties": {
+                                    "id":       {"type": "STRING", "enum": cls._SECTOR_ID_ENUM},
+                                    "module":   {"type": "STRING", "enum": cls._MODULE_ENUM},
+                                    "center_x": {"type": "NUMBER"},
+                                    "center_y": {"type": "NUMBER"},
+                                    "guards": {
+                                        "type": "ARRAY",
+                                        "items": {
+                                            "type": "OBJECT",
+                                            "properties": {
+                                                "sector_id": {"type": "STRING", "enum": cls._SECTOR_ID_ENUM},
+                                                "offset_x":  {"type": "NUMBER"},
+                                                "offset_y":  {"type": "NUMBER"},
+                                                "role":      {"type": "STRING", "enum": cls._ROLE_ENUM},
+                                                "armored":   {"type": "BOOLEAN"},
+                                            },
+                                            "required": ["sector_id", "offset_x", "offset_y", "role", "armored"],
+                                        },
+                                    },
+                                    "props": {
+                                        "type": "ARRAY",
+                                        "items": {"type": "STRING", "enum": cls._PROP_ENUM},
+                                    },
+                                },
+                                "required": ["id", "module", "center_x", "center_y", "guards", "props"],
+                            },
+                        },
+                        "connections": {
+                            "type": "ARRAY",
+                            "items": {
+                                "type": "OBJECT",
+                                "properties": {
+                                    "from_sector": {"type": "STRING", "enum": cls._SECTOR_ID_ENUM},
+                                    "to_sector":   {"type": "STRING", "enum": cls._SECTOR_ID_ENUM},
+                                    "status":      {"type": "STRING", "enum": cls._STATUS_ENUM},
+                                },
+                                "required": ["from_sector", "to_sector", "status"],
+                            },
+                        },
+                        "target_sector":       {"type": "STRING", "enum": cls._SECTOR_ID_ENUM},
+                        "player_spawn_sector": {"type": "STRING", "enum": cls._SECTOR_ID_ENUM},
+                        "extraction_sector":   {"type": "STRING", "enum": cls._SECTOR_ID_ENUM},
+                    },
+                    "required": ["sectors", "connections", "target_sector",
+                                 "player_spawn_sector", "extraction_sector"],
+                }
+            },
+            "required": ["room_graph"],
+        }
+
+    def _generate_content_with_fallback(
+        self, client: Any, preferred_model: str, contents: Any, config: Any
+    ) -> Any:
+        """Executes generate_content with transient retry (503/429) and model fallback."""
+        candidates = [preferred_model]
+        for fallback in ["gemini-3.8-flash", "gemini-3.6-flash"]:
+            if fallback not in candidates:
+                candidates.append(fallback)
+
+        last_exc: Optional[Exception] = None
+        for model in candidates:
+            for attempt in range(2):
+                try:
+                    response = client.models.generate_content(
+                        model=model,
+                        contents=contents,
+                        config=config,
+                    )
+                    return response
+                except Exception as e:
+                    last_exc = e
+                    err_msg = str(e).lower()
+                    # 404 Not Found / deprecated model -> skip directly to next model
+                    if "404" in err_msg or "not_found" in err_msg or "no longer available" in err_msg:
+                        logger.warning(
+                            "[Director] Model '%s' not available (404/deprecated): %s. Trying fallback model...",
+                            model, e,
+                        )
+                        break
+                    # 503 Unavailable / 429 Resource Exhausted -> transient spike, wait briefly and retry once
+                    if ("503" in err_msg or "unavailable" in err_msg or "429" in err_msg or "overloaded" in err_msg) and attempt == 0:
+                        import time
+                        logger.info(
+                            "[Director] Model '%s' experiencing high demand (503/429); retrying in 1.5s...",
+                            model,
+                        )
+                        time.sleep(1.5)
+                        continue
+                    # Other errors or second attempt failed: log and try next model
+                    logger.warning(
+                        "[Director] Generation with model '%s' failed (%s). Checking next candidate model...",
+                        model, e,
+                    )
+                    break
+
+        if last_exc:
+            raise last_exc
+        return None
+
+    def _call_gemini_pass1(self, client, model_name, system_instruction, gt_summary, digest):
+        """Pass 1: generate narrative + mission stats (no room_graph). Schema-enforced."""
+        import json as _json
+        from google.genai import types
+
+        prompt = (
+            "MAP 1 GROUND TRUTH:\n"
+            + _json.dumps(gt_summary, indent=2)
+            + "\n\nPLAYER RUN TELEMETRY DIGEST:\n"
+            + _json.dumps(digest, indent=2)
+            + "\n\nSTORY NODE:\nCurrent: NODE_01 (Rock Bottom) -> Next: NODE_02 (First Blood)\n\n"
+            "Based on the player's telemetry, deduce their archetype and generate the mission narrative,\n"
+            "target configuration, guard disposition, environment, and routes for Node 02.\n"
+            "Do NOT generate the room_graph -- that will be done separately.\n"
+        )
+        response = self._generate_content_with_fallback(
+            client=client,
+            preferred_model=model_name,
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 response_mime_type="application/json",
-                temperature=0.7
-            )
+                response_schema=self._pass1_schema(),
+                temperature=0.7,
+            ),
+        )
+        if response and response.text:
+            return _json.loads(response.text.strip())
+        return None
+
+    def _call_gemini_pass2(self, client, model_name, pass1, map2_layout, seed):
+        """Pass 2: generate room_graph using Pass 1 context as fixed ground truth. Schema-enforced."""
+        import json as _json
+        from google.genai import types
+
+        target = pass1.get("target", {})
+        guards = pass1.get("guards", {})
+        env    = pass1.get("environment", {})
+
+        system_instruction_p2 = (
+            "You are the Spatial Level Architect for 'AdaptiveWorld2D'.\n"
+            "You receive a fully-decided mission context (archetype, target placement, guards, environment)\n"
+            "and a fixed 3x3 spatial grid. Your sole task is to generate the room_graph that spatially\n"
+            "expresses that mission context.\n\n"
+            "STRICT RULES:\n"
+            "- sectors: EXACTLY 9 entries, one per id (NW, NC, NE, MW, MC, ME, SW, SC, SE).\n"
+            "  Each center_x and center_y MUST exactly match the sector_grid_coords for that id.\n"
+            "- connections: EXACTLY 12 entries, one per pair in sector_adjacency. No more, no fewer.\n"
+            "  Each status must be one of: open, barricaded_wire_fence, barricaded_concrete, walled_off.\n"
+            "- target_sector, player_spawn_sector, extraction_sector must each be distinct valid sector ids.\n"
+            "- CRITICAL PATH INVARIANT: A walkable path (treating only 'walled_off' as impassable) MUST\n"
+            "  exist from player_spawn_sector to target_sector, AND from target_sector to extraction_sector.\n"
+            "  Use 'barricaded_*' for chokepoints on the intended path. Reserve 'walled_off' for detours only.\n"
+            "- Choose sector modules thematically: match the target's location_id and archetype.\n"
+            "  (GHOST/warehouse_interior -> WAREHOUSE_INTERIOR in target sector;\n"
+            "   WRECKING_BALL/open_plaza -> FORTIFIED_PLAZA; SPEEDRUNNER/far_docks -> WATERFRONT_DOCKS;\n"
+            "   AGGRESSOR/fortified_building -> SECURITY_COMPOUND)\n"
         )
 
+        prompt_p2 = (
+            "ALREADY-DECIDED MISSION CONTEXT (treat these as immutable facts):\n"
+            f"  player_archetype:        {pass1.get('player_archetype')}\n"
+            f"  target.location_id:      {target.get('location_id')}\n"
+            f"  target.is_indoors:       {target.get('is_indoors')}\n"
+            f"  target.armor:            {target.get('armor')}\n"
+            f"  environment.time_of_day: {env.get('time_of_day')}\n"
+            f"  environment.weather:     {env.get('weather')}\n"
+            f"  guards.count:            {guards.get('count')}\n"
+            f"  guards.armored:          {guards.get('armored')}\n\n"
+            "MAP 2 SPATIAL GRID (fixed coordinates -- use these exact values for center_x/center_y):\n"
+            + _json.dumps(map2_layout, indent=2)
+            + "\n\nGenerate ONLY the room_graph object that spatially expresses the above mission context.\n"
+        )
+        response = self._generate_content_with_fallback(
+            client=client,
+            preferred_model=model_name,
+            contents=prompt_p2,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction_p2,
+                response_mime_type="application/json",
+                response_schema=self._pass2_schema(),
+                temperature=0.5,
+            ),
+        )
         if response and response.text:
-            cleaned_text = response.text.strip()
-            manifest_json = json.loads(cleaned_text)
-            archetype = manifest_json.get("player_archetype", profile.archetype())
-            self._validate_and_repair_room_graph(manifest_json, archetype, seed)
-            logger.info(f"[Director] Successfully generated Node 02 via Gemini: Archetype={manifest_json.get('player_archetype')}")
-            return manifest_json
-
+            return _json.loads(response.text.strip())
         return None
 
     def _validate_and_repair_room_graph(self, manifest_json: Dict[str, Any], archetype: str, seed: Optional[int]) -> None:
