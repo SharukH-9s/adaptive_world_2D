@@ -28,8 +28,9 @@ from .telemetry import TelemetryLog, SurfaceType, MovementType, CombatStyle, Des
 from .profiler import PlayerProfile
 from .target_solver import (
     M2Manifest, TargetConfig, GuardConfig, EnvironmentConfig, RouteConfig,
-    RoomGraphManifest, build_room_graph,
+    RoomGraphManifest, GridDimensions, PropConfig, build_room_graph,
     SECTOR_GRID_COORDS, SECTOR_ADJACENCY, SECTOR_MODULES, CONNECTION_STATUSES,
+    _ARCHETYPE_DEFAULT_GRIDS,
 )
 
 logger = logging.getLogger("gemini_director")
@@ -413,7 +414,9 @@ class GeminiNarrativeDirector:
 
     # ── Schema constants ─────────────────────────────────────────────────────
 
-    _SECTOR_ID_ENUM   = ["NW", "NC", "NE", "MW", "MC", "ME", "SW", "SC", "SE"]
+    _SECTOR_ID_ENUM   = [
+        "NW", "NC", "NE", "MW", "MC", "ME", "SW", "SC", "SE",
+    ] + [f"R{r}_C{c}" for r in range(5) for c in range(5)]
     _MODULE_ENUM      = [
         "WAREHOUSE_INTERIOR", "FORTIFIED_PLAZA", "SLUM_ALLEYWAYS", "URBAN_HIGHWAY",
         "INDUSTRIAL_DEPOT", "WATERFRONT_DOCKS", "SECURITY_COMPOUND",
@@ -421,7 +424,10 @@ class GeminiNarrativeDirector:
     ]
     _STATUS_ENUM      = ["open", "barricaded_wire_fence", "barricaded_concrete", "walled_off"]
     _ROLE_ENUM        = ["patrol", "sentry", "bodyguard"]
-    _PROP_ENUM        = ["fuel_barrel", "crate", "car"]
+    _PROP_ENUM        = [
+        "crate_stack", "power_breaker", "alarm_panel", "explosive_barrel",
+        "vent_shaft", "surveillance_spotlight", "car", "fuel_barrel", "crate",
+    ]
     _ARCHETYPE_ENUM   = ["GHOST", "WRECKING_BALL", "SPEEDRUNNER", "AGGRESSOR", "TACTICIAN", "BALANCED"]
     _LOCATION_ID_ENUM = ["warehouse_interior", "open_plaza", "far_docks", "fortified_building", "mid_street"]
     _ARMOR_ENUM       = ["none", "light", "medium", "heavy", "reinforced"]
@@ -514,6 +520,16 @@ class GeminiNarrativeDirector:
                 "room_graph": {
                     "type": "OBJECT",
                     "properties": {
+                        "grid_dimensions": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "columns": {"type": "INTEGER"},
+                                "rows": {"type": "INTEGER"},
+                                "cell_width": {"type": "NUMBER"},
+                                "cell_height": {"type": "NUMBER"},
+                            },
+                            "required": ["columns", "rows"],
+                        },
                         "sectors": {
                             "type": "ARRAY",
                             "items": {
@@ -539,7 +555,18 @@ class GeminiNarrativeDirector:
                                     },
                                     "props": {
                                         "type": "ARRAY",
-                                        "items": {"type": "STRING", "enum": cls._PROP_ENUM},
+                                        "items": {
+                                            "type": "OBJECT",
+                                            "properties": {
+                                                "type": {"type": "STRING", "enum": cls._PROP_ENUM},
+                                                "offset_x": {"type": "NUMBER"},
+                                                "offset_y": {"type": "NUMBER"},
+                                                "destructible": {"type": "BOOLEAN"},
+                                                "interact_action": {"type": "STRING"},
+                                                "connects_to": {"type": "STRING"},
+                                            },
+                                            "required": ["type"],
+                                        },
                                     },
                                 },
                                 "required": ["id", "module", "center_x", "center_y", "guards", "props"],
@@ -573,7 +600,7 @@ class GeminiNarrativeDirector:
     ) -> Any:
         """Executes generate_content with transient retry (503/429) and model fallback."""
         candidates = [preferred_model]
-        for fallback in ["gemini-3.8-flash", "gemini-3.6-flash"]:
+        for fallback in ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-3.6-flash"]:
             if fallback not in candidates:
                 candidates.append(fallback)
 
@@ -656,24 +683,56 @@ class GeminiNarrativeDirector:
         guards = pass1.get("guards", {})
         env    = pass1.get("environment", {})
 
+        # Leap 3: Extend map2_layout with dynamic grid palette & tactical prop options
+        map2_layout_ext = dict(map2_layout)
+        map2_layout_ext["available_grid_dimensions"] = [
+            {"columns": 2, "rows": 3, "label": "Tight Gauntlet — claustrophobic corridors (ideal for GHOST)"},
+            {"columns": 3, "rows": 3, "label": "Fortified Perimeter — multi-angle compound (AGGRESSOR / BALANCED)"},
+            {"columns": 2, "rows": 4, "label": "Linear Run — long pursuit/escape vector (SPEEDRUNNER)"},
+            {"columns": 3, "rows": 4, "label": "Sprawling Depot — wide vehicle battlefield (WRECKING_BALL)"},
+        ]
+        map2_layout_ext["grid_design_guidelines"] = (
+            "Select grid dimensions based on player archetype and behavioral fingerprint: "
+            "Compact layouts (2x3, 2x4) create high-density stealth tension. "
+            "Wide layouts (3x4) favor vehicle ramming and high-speed chases. "
+            "Balanced (3x3) allows multi-angle tactical approaches. "
+            "Output grid_dimensions as {\"columns\": N, \"rows\": M}."
+        )
+        map2_layout_ext["available_props"] = [
+            {"type": "crate_stack",             "description": "Static cover, optionally destructible"},
+            {"type": "power_breaker",           "description": "On interact/damage: cuts sector lights, drops guard vision by 60%"},
+            {"type": "alarm_panel",             "description": "Alerted guards navigate here to sound compound-wide lockdown"},
+            {"type": "explosive_barrel",        "description": "100 HP, AoE damage, demolishes adjacent barricades on destruction"},
+            {"type": "vent_shaft",              "description": "Crawl passage bypassing barricaded/walled sector borders"},
+            {"type": "surveillance_spotlight",  "description": "Rotating 2D light cone; tripping it raises sector alert"},
+            {"type": "car",                     "description": "Drivable vehicle for ramming barricades or fast traversal"},
+        ]
+        map2_layout_ext["prop_placement_guidelines"] = (
+            "Place tactical props based on player psychology:\n"
+            "- GHOST: Include power_breaker near target sector, alarm_panels at guard stations, "
+            "vent_shaft bypassing walled corridors.\n"
+            "- WRECKING_BALL: Place explosive_barrels along road choke points, cars for ramming.\n"
+            "- SPEEDRUNNER: Place cars along main route, surveillance_spotlights at key intersections.\n"
+            "- AGGRESSOR: Place alarm_panels and surveillance_spotlights in defensive layers.\n"
+            "Props must specify type, offset_x, offset_y relative to sector center."
+        )
+
         system_instruction_p2 = (
             "You are the Spatial Level Architect for 'AdaptiveWorld2D'.\n"
             "You receive a fully-decided mission context (archetype, target placement, guards, environment)\n"
-            "and a fixed 3x3 spatial grid. Your sole task is to generate the room_graph that spatially\n"
+            "and spatial grid guidelines. Your sole task is to generate the room_graph that spatially\n"
             "expresses that mission context.\n\n"
             "STRICT RULES:\n"
-            "- sectors: EXACTLY 9 entries, one per id (NW, NC, NE, MW, MC, ME, SW, SC, SE).\n"
-            "  Each center_x and center_y MUST exactly match the sector_grid_coords for that id.\n"
-            "- connections: EXACTLY 12 entries, one per pair in sector_adjacency. No more, no fewer.\n"
-            "  Each status must be one of: open, barricaded_wire_fence, barricaded_concrete, walled_off.\n"
+            "- grid_dimensions: specify columns and rows matching the selected archetype layout.\n"
+            "- sectors: EXACTLY columns * rows entries. For 3x3, use NW..SE IDs; for non-3x3, use R{r}_C{c} IDs.\n"
+            "  Each center_x and center_y MUST match grid center coordinates.\n"
+            "- connections: all adjacent pairs must be present with status: open, barricaded_wire_fence, barricaded_concrete, walled_off.\n"
             "- target_sector, player_spawn_sector, extraction_sector must each be distinct valid sector ids.\n"
             "- CRITICAL PATH INVARIANT: A walkable path (treating only 'walled_off' as impassable) MUST\n"
             "  exist from player_spawn_sector to target_sector, AND from target_sector to extraction_sector.\n"
             "  Use 'barricaded_*' for chokepoints on the intended path. Reserve 'walled_off' for detours only.\n"
+            "- props: tactically distribute interactive props (power_breaker, alarm_panel, explosive_barrel, vent_shaft, surveillance_spotlight, car, crate_stack) across sectors.\n"
             "- Choose sector modules thematically: match the target's location_id and archetype.\n"
-            "  (GHOST/warehouse_interior -> WAREHOUSE_INTERIOR in target sector;\n"
-            "   WRECKING_BALL/open_plaza -> FORTIFIED_PLAZA; SPEEDRUNNER/far_docks -> WATERFRONT_DOCKS;\n"
-            "   AGGRESSOR/fortified_building -> SECURITY_COMPOUND)\n"
         )
 
         prompt_p2 = (
@@ -686,8 +745,8 @@ class GeminiNarrativeDirector:
             f"  environment.weather:     {env.get('weather')}\n"
             f"  guards.count:            {guards.get('count')}\n"
             f"  guards.armored:          {guards.get('armored')}\n\n"
-            "MAP 2 SPATIAL GRID (fixed coordinates -- use these exact values for center_x/center_y):\n"
-            + _json.dumps(map2_layout, indent=2)
+            "MAP 2 SPATIAL GUIDELINES & PROPS PALETTE:\n"
+            + _json.dumps(map2_layout_ext, indent=2)
             + "\n\nGenerate ONLY the room_graph object that spatially expresses the above mission context.\n"
         )
         response = self._generate_content_with_fallback(
@@ -707,10 +766,8 @@ class GeminiNarrativeDirector:
 
     def _validate_and_repair_room_graph(self, manifest_json: Dict[str, Any], archetype: str, seed: Optional[int]) -> None:
         """Mutates manifest_json in place: ensures a structurally valid `room_graph` is present.
-        Gemini output is not guaranteed to be schema-perfect (wrong sector count, broken
-        connectivity, hallucinated ids). If validation fails, the entire room_graph is replaced
-        with the deterministic handcrafted template for `archetype` so Unity never receives a
-        malformed graph."""
+        If validation fails, the entire room_graph is replaced with the deterministic template
+        (preserving grid_dimensions shape) for `archetype` so Unity never receives a malformed graph."""
         rg = manifest_json.get("room_graph")
         if rg is None:
             errors: List[str] = ["room_graph missing from Gemini response"]
@@ -721,22 +778,33 @@ class GeminiNarrativeDirector:
                 target_sector=rg.get("target_sector", ""),
                 player_spawn_sector=rg.get("player_spawn_sector", ""),
                 extraction_sector=rg.get("extraction_sector", ""),
+                grid_dimensions=rg.get("grid_dimensions"),
             )
             errors = probe.validate()
 
         if errors:
             logger.warning(f"[Director] Gemini room_graph invalid ({errors}); repairing with deterministic template.")
             rng = random.Random(seed)
-            manifest_json["room_graph"] = build_room_graph(archetype, rng).to_dict()
+            grid_dims = rg.get("grid_dimensions") if isinstance(rg, dict) else None
+            cols, rows = 3, 3
+            if isinstance(grid_dims, dict):
+                cols = grid_dims.get("columns", 3)
+                rows = grid_dims.get("rows", 3)
+            elif grid_dims is not None:
+                cols = getattr(grid_dims, "columns", 3)
+                rows = getattr(grid_dims, "rows", 3)
+            manifest_json["room_graph"] = build_room_graph(archetype, rng, grid_shape=(cols, rows)).to_dict()
 
     def _generate_fallback(self, profile: PlayerProfile, telemetry: TelemetryLog, seed: Optional[int] = None) -> Dict[str, Any]:
         """
         Deterministic, narrative-rich fallback generator when Gemini API is offline.
+        Uses archetype-specific dynamic grid topology and tactical props.
         """
         archetype = profile.archetype()
         digest = self._build_telemetry_digest(profile, telemetry)
         rng = random.Random(seed)
-        room_graph = build_room_graph(archetype, rng).to_dict()
+        grid_shape = _ARCHETYPE_DEFAULT_GRIDS.get(archetype, (3, 3))
+        room_graph = build_room_graph(archetype, rng, grid_shape=grid_shape).to_dict()
 
         # Base archetype tailoring
         if archetype == "GHOST":

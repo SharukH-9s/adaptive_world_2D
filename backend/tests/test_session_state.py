@@ -18,6 +18,25 @@ class TestSessionStateIsolation(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.client = TestClient(app)
+        cls.director_patch = patch("backend.api.server.get_director")
+        cls.mock_director_fn = cls.director_patch.start()
+        from unittest.mock import MagicMock
+        mock_dir = MagicMock()
+        mock_dir.generate_node_2.return_value = {
+            "mission_id": "M02_THE_HIT",
+            "narrative_title": "Isolated Mission",
+            "target": {"location_id": "warehouse_interior", "armor": "light", "health": 80},
+            "guards": {"count": 2, "disposition": "relaxed", "patrol_intensity": "low"},
+            "environment": {"time_of_day": "night", "weather": "fog", "visibility": 0.5, "ambient_light": 0.3},
+            "routes": {"primary_route": "alley_south", "blocked_routes": [], "cars_available": False},
+            "room_graph": None,
+            "player_archetype": "GHOST",
+        }
+        cls.mock_director_fn.return_value = mock_dir
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.director_patch.stop()
 
     def setUp(self):
         # Reset session store for clean test isolation

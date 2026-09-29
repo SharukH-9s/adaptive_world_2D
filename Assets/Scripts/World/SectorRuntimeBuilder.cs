@@ -49,8 +49,10 @@ namespace AdaptiveWorld2D.World
                 return null;
             }
 
-            Debug.Log($"[SectorRuntimeBuilder] Building 9-sector grid | spawn={roomGraph.player_spawn_sector} " +
-                      $"-> target={roomGraph.target_sector} -> extraction={roomGraph.extraction_sector}");
+            GridDimensions dims = roomGraph.GetGridDimensions();
+
+            Debug.Log($"[SectorRuntimeBuilder] Building {dims.columns}x{dims.rows} grid | " +
+                      $"spawn={roomGraph.player_spawn_sector} -> target={roomGraph.target_sector} -> extraction={roomGraph.extraction_sector}");
 
             ClearPrevious();
             GameObject root = new GameObject(ROOT_NAME);
@@ -63,6 +65,7 @@ namespace AdaptiveWorld2D.World
                 sectorRoot.transform.position = center;
 
                 BuildModule(sectorRoot.transform, sector.module, center);
+                BuildProps(sectorRoot.transform, sector, center);
 
                 if (!Application.isPlaying && sector.id == roomGraph.player_spawn_sector)
                     CreateRoleMarker(sectorRoot.transform, "SPAWN", center, new Color(0.2f, 0.9f, 1f, 0.9f));
@@ -79,11 +82,12 @@ namespace AdaptiveWorld2D.World
                 BuildGateway(gatewaysRoot.transform, roomGraph, conn);
             }
 
-            BuildPerimeterBoundaries(root.transform);
+            BuildPerimeterBoundaries(root.transform, dims);
 
             Debug.Log("[SectorRuntimeBuilder] Sector grid build complete.");
             return root;
         }
+
 
         public static void ClearPrevious()
         {
@@ -440,13 +444,15 @@ namespace AdaptiveWorld2D.World
 #endif
         }
 
-        private static void BuildPerimeterBoundaries(Transform parent)
+        private static void BuildPerimeterBoundaries(Transform parent, GridDimensions dims = null)
         {
+            if (dims == null) dims = new GridDimensions();
+
             GameObject perim = new GameObject("PerimeterBoundaries");
             perim.transform.SetParent(parent);
 
-            float halfW = (3 * CELL_WIDTH) / 2f;  // 30f
-            float halfH = (3 * CELL_HEIGHT) / 2f; // 22.5f
+            float halfW = (dims.columns * dims.cell_width)  / 2f;
+            float halfH = (dims.rows    * dims.cell_height) / 2f;
             float thickness = 1.5f;
             Color wallColor = new Color(0.18f, 0.17f, 0.16f);
 
@@ -463,6 +469,200 @@ namespace AdaptiveWorld2D.World
             CreateSolidWall(perim.transform, "Perimeter_E", new Vector3(halfW + thickness / 2f, 0f, 0f),
                 new Vector2(thickness, halfH * 2f + thickness * 2f), LAYER_BUILDING, wallColor);
         }
+
+        // ─────────────────────────────────────────────────────────────
+        //  PROP SYSTEM (Leap 3)
+        // ─────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Instantiates every structured prop in a sector's props list.
+        /// </summary>
+        private static void BuildProps(Transform parent, SectorConfig sector, Vector3 center)
+        {
+            if (sector.props == null) return;
+            int idx = 0;
+            foreach (PropData p in sector.props)
+            {
+                if (p == null) continue;
+                BuildProp(parent, p, center, sector.id, idx++);
+            }
+        }
+
+        /// <summary>
+        /// Dispatches a single <see cref="PropData"/> record to the appropriate factory method.
+        /// Unknown prop types fall back to a generic crate_stack so levels never have holes.
+        /// </summary>
+        private static void BuildProp(Transform parent, PropData p, Vector3 center, string sectorId, int idx)
+        {
+            Vector3 pos = center + new Vector3(p.offset_x, p.offset_y, 0f);
+            string uid = $"{sectorId}_{p.type}_{idx:D2}";
+
+            switch (p.type)
+            {
+                case "crate_stack":
+                case "crate":           // legacy alias
+                    CreateCrateStack(parent, uid, pos, p.destructible);
+                    break;
+
+                case "power_breaker":
+                    CreatePowerBreaker(parent, uid, pos, p.interact_action);
+                    break;
+
+                case "alarm_panel":
+                    CreateAlarmPanel(parent, uid, pos, p.interact_action);
+                    break;
+
+                case "explosive_barrel":
+                case "fuel_barrel":     // legacy alias
+                    CreateExplosiveBarrel(parent, uid, pos, p.destructible);
+                    break;
+
+                case "vent_shaft":
+                    CreateVentShaft(parent, uid, pos, p.connects_to);
+                    break;
+
+                case "surveillance_spotlight":
+                    CreateSurveillanceSpotlight(parent, uid, pos);
+                    break;
+
+                case "car":
+                    CreatePropCar(parent, uid, pos, p.destructible);
+                    break;
+
+                default:
+                    Debug.LogWarning($"[SectorRuntimeBuilder] Unknown prop type '{p.type}' in {sectorId} -- falling back to crate_stack.");
+                    CreateCrateStack(parent, uid, pos, false);
+                    break;
+            }
+        }
+
+        // ──── Prop factories ─────────────────────────────────────────
+
+        private static void CreateCrateStack(Transform parent, string uid, Vector3 pos, bool destructible)
+        {
+            if (destructible)
+            {
+                // Re-use existing destructible wall at crate scale.
+                CreateDestructible(parent, uid, pos, new Vector2(1.4f, 1.1f), 40, new Color(0.5f, 0.42f, 0.30f));
+            }
+            else
+            {
+                CreateCrate(parent, uid, pos);
+            }
+        }
+
+        private static void CreatePowerBreaker(Transform parent, string uid, Vector3 pos, string interactAction)
+        {
+            GameObject go = new GameObject(uid);
+            go.transform.SetParent(parent);
+            go.transform.position = pos;
+            go.layer = LAYER_INTERACTABLE;
+
+            SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = WorldManifestApplier.GetUniversalWhiteSprite();
+            go.transform.localScale = new Vector3(0.5f, 0.8f, 1f);
+            sr.color = new Color(0.15f, 0.55f, 1f);   // blue panel
+            sr.sortingOrder = 3;
+
+            BoxCollider2D col = go.AddComponent<BoxCollider2D>();
+            col.size = new Vector2(0.9f, 0.9f);
+
+            var pb = go.AddComponent<PowerBreaker>();
+            pb.interactAction = interactAction;
+        }
+
+        private static void CreateAlarmPanel(Transform parent, string uid, Vector3 pos, string interactAction)
+        {
+            GameObject go = new GameObject(uid);
+            go.transform.SetParent(parent);
+            go.transform.position = pos;
+            go.layer = LAYER_INTERACTABLE;
+
+            SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = WorldManifestApplier.GetUniversalWhiteSprite();
+            go.transform.localScale = new Vector3(0.55f, 0.7f, 1f);
+            sr.color = new Color(0.9f, 0.2f, 0.2f);   // red panel
+            sr.sortingOrder = 3;
+
+            BoxCollider2D col = go.AddComponent<BoxCollider2D>();
+            col.size = new Vector2(0.9f, 0.9f);
+
+            var ap = go.AddComponent<AlarmPanel>();
+            ap.interactAction = interactAction;
+        }
+
+        private static void CreateExplosiveBarrel(Transform parent, string uid, Vector3 pos, bool destructible)
+        {
+            int hp = destructible ? 30 : 60;
+            GameObject go = CreateSolidWall(parent, uid, pos, new Vector2(0.8f, 1.0f), LAYER_INTERACTABLE, new Color(0.75f, 0.25f, 0.15f));
+            var hazard = go.AddComponent<ExplosiveHazard>();
+            hazard.hazardId = uid.ToLower();
+            hazard.maxHealth = hp;
+            hazard.currentHealth = hp;
+        }
+
+        private static void CreateVentShaft(Transform parent, string uid, Vector3 pos, string connectsTo)
+        {
+            GameObject go = new GameObject(uid);
+            go.transform.SetParent(parent);
+            go.transform.position = pos;
+            go.layer = LAYER_INTERACTABLE;
+
+            SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = WorldManifestApplier.GetUniversalWhiteSprite();
+            go.transform.localScale = new Vector3(1.2f, 0.5f, 1f);
+            sr.color = new Color(0.5f, 0.5f, 0.55f, 0.8f);  // grey vent grate
+            sr.sortingOrder = 2;
+
+            BoxCollider2D col = go.AddComponent<BoxCollider2D>();
+            col.size = new Vector2(1.0f, 0.8f);
+            col.isTrigger = true;
+
+            var vs = go.AddComponent<VentShaft>();
+            vs.destinationSectorId = connectsTo;
+        }
+
+        private static void CreateSurveillanceSpotlight(Transform parent, string uid, Vector3 pos)
+        {
+            GameObject go = new GameObject(uid);
+            go.transform.SetParent(parent);
+            go.transform.position = pos;
+            go.layer = LAYER_INTERACTABLE;
+
+            SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = WorldManifestApplier.GetUniversalWhiteSprite();
+            go.transform.localScale = new Vector3(0.4f, 0.4f, 1f);
+            sr.color = new Color(0.9f, 0.85f, 0.4f);  // yellow spotlight head
+            sr.sortingOrder = 4;
+
+            BoxCollider2D col = go.AddComponent<BoxCollider2D>();
+            col.size = new Vector2(0.8f, 0.8f);
+            col.isTrigger = true;
+
+            go.AddComponent<SurveillanceSpotlight>();
+        }
+
+        private static void CreatePropCar(Transform parent, string uid, Vector3 pos, bool destructible)
+        {
+            // Re-use existing BurnableCar setup via a slim wrapper to keep runtime size small.
+            GameObject go = new GameObject(uid);
+            go.transform.SetParent(parent);
+            go.transform.position = pos;
+            go.layer = LAYER_INTERACTABLE;
+
+            SpriteRenderer sr = go.AddComponent<SpriteRenderer>();
+            sr.sprite = WorldManifestApplier.GetUniversalWhiteSprite();
+            go.transform.localScale = new Vector3(2.4f, 1.2f, 1f);
+            sr.color = new Color(0.4f, 0.4f, 0.45f);   // dark grey parked car
+            sr.sortingOrder = 2;
+
+            BoxCollider2D col = go.AddComponent<BoxCollider2D>();
+            col.size = new Vector2(2.0f, 1.0f);
+
+            if (destructible)
+                go.AddComponent<BurnableCar>();
+        }
+
 
         // ─────────────────────────────────────────────────────────────
         //  SPRITE UTILITIES

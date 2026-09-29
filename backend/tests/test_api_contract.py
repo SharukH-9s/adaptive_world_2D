@@ -10,10 +10,31 @@ from fastapi.testclient import TestClient
 from backend.api.server import app, session_store
 
 
+from unittest.mock import patch, MagicMock
+
+
 class TestApiContract(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.client = TestClient(app)
+        cls.director_patch = patch("backend.api.server.get_director")
+        cls.mock_director_fn = cls.director_patch.start()
+        mock_dir = MagicMock()
+        mock_dir.generate_node_2.return_value = {
+            "mission_id": "M02_THE_HIT",
+            "narrative_title": "Contract Mission",
+            "target": {"location_id": "warehouse_interior", "armor": "light", "health": 80},
+            "guards": {"count": 2, "disposition": "relaxed", "patrol_intensity": "low"},
+            "environment": {"time_of_day": "night", "weather": "fog", "visibility": 0.5, "ambient_light": 0.3},
+            "routes": {"primary_route": "alley_south", "blocked_routes": [], "cars_available": False},
+            "room_graph": {"target_sector": "NW"},
+            "player_archetype": "GHOST",
+        }
+        cls.mock_director_fn.return_value = mock_dir
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.director_patch.stop()
 
     def setUp(self):
         session_store.reset(None)

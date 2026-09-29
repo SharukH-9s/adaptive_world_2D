@@ -140,5 +140,52 @@ class TestRoomGraphValidation(unittest.TestCase):
         self.assertTrue(any("not a valid sector id" in e for e in errors))
 
 
+class TestDynamicGridRoomGraph(unittest.TestCase):
+    def test_grid_generators(self):
+        from backend.target_solver import generate_grid_coords, generate_adjacency
+        coords = generate_grid_coords(2, 3, 20.0, 15.0)
+        self.assertEqual(len(coords), 6)
+        self.assertIn("R0_C0", coords)
+        self.assertIn("R2_C1", coords)
+
+        adj = generate_adjacency(2, 3)
+        # 2x3 grid: horizontal = 1 per row * 3 rows = 3; vertical = 2 per row-pair * 2 = 4; total = 7
+        self.assertEqual(len(adj), 7)
+
+    def test_procedural_generation_all_archetypes(self):
+        from backend.target_solver import build_room_graph
+        shapes = [(2, 3), (2, 4), (3, 4), (4, 4)]
+        archetypes = ["GHOST", "SPEEDRUNNER", "WRECKING_BALL", "AGGRESSOR", "BALANCED"]
+        for arch in archetypes:
+            for cols, rows in shapes:
+                rg = build_room_graph(arch, grid_shape=(cols, rows))
+                self.assertEqual(len(rg.sectors), cols * rows)
+                errors = rg.validate()
+                self.assertEqual(errors, [], f"Validation failed for {arch} {cols}x{rows}: {errors}")
+
+    def test_dynamic_grid_validation_catches_invalid_id(self):
+        from backend.target_solver import build_room_graph
+        rg = build_room_graph("GHOST", grid_shape=(2, 3))
+        rg.target_sector = "INVALID_ID"
+        errors = rg.validate()
+        self.assertTrue(any("not a valid sector id" in e for e in errors))
+
+    def test_dynamic_grid_validation_catches_missing_sector(self):
+        from backend.target_solver import build_room_graph
+        rg = build_room_graph("SPEEDRUNNER", grid_shape=(2, 4))
+        rg.sectors.pop()
+        errors = rg.validate()
+        self.assertTrue(any("Missing sectors" in e for e in errors))
+
+    def test_dynamic_grid_props_exist(self):
+        from backend.target_solver import build_room_graph, PropConfig
+        rg = build_room_graph("GHOST", grid_shape=(2, 3))
+        all_props = [p for s in rg.sectors for p in s.props]
+        self.assertTrue(len(all_props) > 0)
+        for p in all_props:
+            self.assertIsInstance(p, PropConfig)
+            self.assertTrue(p.type)
+
+
 if __name__ == "__main__":
     unittest.main()

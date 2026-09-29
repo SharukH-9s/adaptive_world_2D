@@ -32,7 +32,7 @@ namespace AdaptiveWorld2D.Director
             {
                 if (s == null) continue;
                 s.guards ??= new List<GuardEntityConfig>();
-                s.props ??= new List<string>();
+                s.props ??= new List<PropData>();   // Leap 3: structured PropData (was List<string>)
             }
 
             if (manifest.routes != null)

@@ -46,6 +46,9 @@ namespace AdaptiveWorld2D.EditorTests
             RunTest("JsonUtility Deserialization Contract", TestJsonUtilityDeserialization);
             RunTest("Guard Entity Config Parsing", TestGuardEntityConfig);
             RunTest("Routes Manifest Parsing", TestRoutesManifestParsing);
+            RunTest("Leap 3 Dynamic Grid Deserialization", TestDynamicGridDeserialization);
+            RunTest("Leap 3 Dynamic RoomGraph Validation", TestDynamicRoomGraphValidation);
+            RunTest("Leap 3 Structured PropData Deserialization", TestStructuredPropDataDeserialization);
 
             Debug.Log("------------------------------------------------------------------");
             if (passed == total)
@@ -176,6 +179,74 @@ namespace AdaptiveWorld2D.EditorTests
                 throw new Exception("RoutesManifest blocked_routes mismatch.");
             if (routes.reinforced_barricades.Count != 1 || routes.reinforced_barricades[0] != "concrete_barrier_01")
                 throw new Exception("RoutesManifest reinforced_barricades mismatch.");
+        }
+
+        private static void TestDynamicGridDeserialization()
+        {
+            string sampleJson = "{\"grid_dimensions\":{\"columns\":2,\"rows\":3,\"cell_width\":20.0,\"cell_height\":15.0},\"sectors\":[{\"id\":\"R0_C0\",\"module\":\"WAREHOUSE_INTERIOR\",\"center_x\":-10.0,\"center_y\":15.0,\"guards\":[],\"props\":[]}],\"connections\":[],\"target_sector\":\"R0_C0\",\"player_spawn_sector\":\"R0_C0\",\"extraction_sector\":\"R0_C0\"}";
+
+            RoomGraphManifest rg = JsonUtility.FromJson<RoomGraphManifest>(sampleJson);
+            if (rg == null) throw new Exception("Deserialization returned null.");
+            if (rg.grid_dimensions == null) throw new Exception("grid_dimensions was not deserialized.");
+            if (rg.grid_dimensions.columns != 2 || rg.grid_dimensions.rows != 3)
+                throw new Exception($"Expected 2x3 grid dimensions, got {rg.grid_dimensions.columns}x{rg.grid_dimensions.rows}.");
+            if (rg.GetGridDimensions().columns != 2)
+                throw new Exception("GetGridDimensions() failed to return correct columns.");
+        }
+
+        private static void TestDynamicRoomGraphValidation()
+        {
+            // Valid 2x2 dynamic grid: 4 sectors, (2-1)*2 + 2*(2-1) = 4 connections
+            RoomGraphManifest validRg = new RoomGraphManifest
+            {
+                grid_dimensions = new GridDimensions { columns = 2, rows = 2, cell_width = 20f, cell_height = 15f },
+                sectors = new List<SectorConfig>
+                {
+                    new SectorConfig { id = "R0_C0", module = "WAREHOUSE_INTERIOR" },
+                    new SectorConfig { id = "R0_C1", module = "FORTIFIED_PLAZA" },
+                    new SectorConfig { id = "R1_C0", module = "OPEN_STREET" },
+                    new SectorConfig { id = "R1_C1", module = "SECURITY_COMPOUND" }
+                },
+                connections = new List<ConnectionConfig>
+                {
+                    new ConnectionConfig { from_sector = "R0_C0", to_sector = "R0_C1", status = "open" },
+                    new ConnectionConfig { from_sector = "R1_C0", to_sector = "R1_C1", status = "open" },
+                    new ConnectionConfig { from_sector = "R0_C0", to_sector = "R1_C0", status = "open" },
+                    new ConnectionConfig { from_sector = "R0_C1", to_sector = "R1_C1", status = "open" }
+                },
+                player_spawn_sector = "R0_C0",
+                target_sector = "R1_C1",
+                extraction_sector = "R0_C1"
+            };
+
+            var errors = AdaptiveWorld2D.World.RoomGraphValidator.Validate(validRg);
+            if (errors.Count > 0)
+                throw new Exception($"Valid dynamic grid failed validation: {string.Join("; ", errors)}");
+
+            // Invalid connection status check
+            validRg.connections[0].status = "invalid_status";
+            var invalidErrors = AdaptiveWorld2D.World.RoomGraphValidator.Validate(validRg);
+            if (invalidErrors.Count == 0)
+                throw new Exception("Expected validation error for invalid connection status, but got none.");
+        }
+
+        private static void TestStructuredPropDataDeserialization()
+        {
+            string sampleJson = "{\"sectors\":[{\"id\":\"MC\",\"module\":\"SECURITY_COMPOUND\",\"center_x\":0.0,\"center_y\":0.0,\"props\":[{\"type\":\"power_breaker\",\"offset_x\":1.5,\"offset_y\":-2.0,\"destructible\":true,\"interact_action\":\"CUT_POWER\",\"connects_to\":\"\"},{\"type\":\"vent_shaft\",\"offset_x\":-3.0,\"offset_y\":1.0,\"destructible\":false,\"interact_action\":\"\",\"connects_to\":\"NE\"}]}]}";
+
+            RoomGraphManifest rg = JsonUtility.FromJson<RoomGraphManifest>(sampleJson);
+            if (rg == null || rg.sectors == null || rg.sectors.Count == 0)
+                throw new Exception("Failed to deserialize sector.");
+
+            var props = rg.sectors[0].props;
+            if (props == null || props.Count != 2)
+                throw new Exception($"Expected 2 props deserialized, got {props?.Count ?? 0}.");
+
+            if (props[0].type != "power_breaker" || props[0].interact_action != "CUT_POWER" || !props[0].destructible)
+                throw new Exception("power_breaker PropData fields failed to deserialize accurately.");
+
+            if (props[1].type != "vent_shaft" || props[1].connects_to != "NE")
+                throw new Exception("vent_shaft PropData fields failed to deserialize accurately.");
         }
     }
 }

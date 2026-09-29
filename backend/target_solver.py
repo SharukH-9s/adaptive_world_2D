@@ -304,6 +304,70 @@ SECTOR_MODULES = (
 CONNECTION_STATUSES = ("open", "barricaded_wire_fence", "barricaded_concrete", "walled_off")
 IMPASSABLE_STATUSES = ("walled_off",)  # only status that fully blocks connectivity (others are destructible)
 
+# Tactical prop types supported by the Unity SectorRuntimeBuilder (Leap 3).
+PROP_TYPES = (
+    "crate_stack",            # static cover, optionally destructible
+    "power_breaker",          # cuts sector/compound lights on interact/damage
+    "alarm_panel",            # alerted guards navigate here to summon backup
+    "explosive_barrel",       # 100 HP; AoE damage + demolishes adjacent barricades
+    "vent_shaft",             # crawl passage bypassing barricaded/walled edges
+    "surveillance_spotlight", # rotating 2D light cone; trips alert on contact
+    "car",                    # drivable vehicle
+    # Legacy prop names kept for backward-compatibility with old sessions/saves:
+    "fuel_barrel",            # alias → explosive_barrel behaviour in Unity
+    "crate",                  # alias → crate_stack behaviour in Unity
+)
+
+
+@dataclass
+class PropConfig:
+    """Structured tactical prop placement within a sector (Leap 3)."""
+    type: str = "crate_stack"      # one of PROP_TYPES
+    offset_x: float = 0.0
+    offset_y: float = 0.0
+    destructible: bool = False
+    interact_action: str = ""      # "CUT_POWER", "SABOTAGE", or empty
+    connects_to: str = ""          # for vent_shaft: destination sector id
+
+
+# ---------------------------------------------------------------------------
+# Dynamic grid coordinate / adjacency generators (Leap 3)
+# ---------------------------------------------------------------------------
+
+def generate_grid_coords(
+    cols: int,
+    rows: int,
+    cell_w: float = 20.0,
+    cell_h: float = 15.0,
+) -> dict:
+    """
+    Generates sector-id → (center_x, center_y) for any N×M grid.
+    Sector IDs follow the pattern "R{row}_C{col}" (e.g. "R0_C0").
+    Row 0 = topmost (largest positive Y), Col 0 = leftmost (most negative X).
+    Matches Unity coordinate conventions used by SectorRuntimeBuilder.
+    """
+    total_w = cols * cell_w
+    total_h = rows * cell_h
+    coords = {}
+    for r in range(rows):
+        for c in range(cols):
+            x = -total_w / 2.0 + cell_w / 2.0 + c * cell_w
+            y =  total_h / 2.0 - cell_h / 2.0 - r * cell_h
+            coords[f"R{r}_C{c}"] = (round(x, 2), round(y, 2))
+    return coords
+
+
+def generate_adjacency(cols: int, rows: int) -> list:
+    """Returns all horizontal and vertical adjacent sector pairs for an N×M grid."""
+    pairs = []
+    for r in range(rows):
+        for c in range(cols):
+            if c + 1 < cols:   # horizontal neighbour
+                pairs.append((f"R{r}_C{c}", f"R{r}_C{c+1}"))
+            if r + 1 < rows:   # vertical neighbour
+                pairs.append((f"R{r}_C{c}", f"R{r+1}_C{c}"))
+    return pairs
+
 
 @dataclass
 class GuardEntityConfig:
@@ -332,12 +396,12 @@ class TargetBossConfig:
 
 @dataclass
 class SectorConfig:
-    id: str = "NW"                                   # one of the 9 grid ids
+    id: str = "NW"                                   # one of the grid sector ids
     module: str = "OPEN_STREET"
     center_x: float = 0.0
     center_y: float = 0.0
     guards: List[GuardEntityConfig] = field(default_factory=list)
-    props: List[str] = field(default_factory=list)    # e.g. "fuel_barrel", "crate", "car"
+    props: List[PropConfig] = field(default_factory=list)  # structured tactical props (Leap 3)
 
 
 @dataclass
@@ -348,12 +412,22 @@ class ConnectionConfig:
 
 
 @dataclass
+class GridDimensions:
+    """Optional grid shape metadata (Leap 3). Absent/default → legacy 3×3 behaviour."""
+    columns: int = 3
+    rows: int = 3
+    cell_width: float = 20.0
+    cell_height: float = 15.0
+
+
+@dataclass
 class RoomGraphManifest:
     sectors: List[SectorConfig] = field(default_factory=list)
     connections: List[ConnectionConfig] = field(default_factory=list)
     target_sector: str = "NW"
     player_spawn_sector: str = "SW"
     extraction_sector: str = "NE"
+    grid_dimensions: Optional[GridDimensions] = None  # None → legacy 3×3 (backward-compatible)
 
     def to_dict(self):
         return asdict(self)
@@ -362,8 +436,31 @@ class RoomGraphManifest:
         """Returns a list of schema/connectivity problems. Empty list = fully valid."""
         errors: List[str] = []
 
+        dims = self.grid_dimensions
+        if isinstance(dims, dict):
+            cols = dims.get("columns", 3)
+            rows = dims.get("rows", 3)
+            cw = dims.get("cell_width", 20.0)
+            ch = dims.get("cell_height", 15.0)
+        elif dims is not None:
+            cols = dims.columns
+            rows = dims.rows
+            cw = dims.cell_width
+            ch = dims.cell_height
+        else:
+            cols, rows, cw, ch = 3, 3, 20.0, 15.0
+
+        is_legacy_3x3 = (cols == 3 and rows == 3 and any(s.id in SECTOR_GRID_COORDS if not isinstance(s, dict) else s.get("id") in SECTOR_GRID_COORDS for s in self.sectors))
+
+        if is_legacy_3x3:
+            expected_ids = set(SECTOR_GRID_COORDS.keys())
+            expected_edges = set(SECTOR_ADJACENCY)
+        else:
+            expected_coords = generate_grid_coords(cols, rows, cw, ch)
+            expected_ids = set(expected_coords.keys())
+            expected_edges = set(generate_adjacency(cols, rows))
+
         ids = {s.id if not isinstance(s, dict) else s["id"] for s in self.sectors}
-        expected_ids = set(SECTOR_GRID_COORDS.keys())
         if ids != expected_ids:
             missing = expected_ids - ids
             extra = ids - expected_ids
@@ -376,7 +473,6 @@ class RoomGraphManifest:
             return conn[attr] if isinstance(conn, dict) else getattr(conn, attr)
 
         edge_set = {(_c(c, "from_sector"), _c(c, "to_sector")) for c in self.connections}
-        expected_edges = set(SECTOR_ADJACENCY)
         if edge_set != expected_edges:
             missing_edges = expected_edges - edge_set
             extra_edges = edge_set - expected_edges
@@ -392,7 +488,7 @@ class RoomGraphManifest:
 
         for key in ("target_sector", "player_spawn_sector", "extraction_sector"):
             val = getattr(self, key)
-            if val not in SECTOR_GRID_COORDS:
+            if val not in expected_ids:
                 errors.append(f"{key}='{val}' is not a valid sector id")
 
         if not errors:
@@ -474,6 +570,7 @@ class RoomGraphManifest:
 
 
 def _sector(id_: str, module: str, guards=None, props=None) -> "SectorConfig":
+    """Helper for legacy 3×3 templates: looks up coords from SECTOR_GRID_COORDS."""
     x, y = SECTOR_GRID_COORDS[id_]
     return SectorConfig(id=id_, module=module, center_x=x, center_y=y,
                          guards=guards or [], props=props or [])
@@ -488,9 +585,14 @@ def _edges(status_map: dict) -> List["ConnectionConfig"]:
     return out
 
 
-def build_room_graph(archetype: str, rng: Optional[random.Random] = None) -> RoomGraphManifest:
+def build_room_graph(
+    archetype: str,
+    rng: Optional[random.Random] = None,
+    grid_shape: tuple = (3, 3),   # (cols, rows) — (3,3) preserves exact legacy templates
+) -> RoomGraphManifest:
     """
-    Handcrafted 9-sector blueprint templates, one per archetype.
+    Handcrafted 9-sector blueprint templates (for 3×3 grids), one per archetype.
+    For non-3×3 grids, delegates to _build_procedural_graph().
 
     Each template guarantees (verified by RoomGraphManifest.validate()):
       - All 9 sectors present with a module + coordinates.
@@ -498,6 +600,11 @@ def build_room_graph(archetype: str, rng: Optional[random.Random] = None) -> Roo
       - A non-'walled_off' path exists spawn -> target -> extraction.
     """
     rng = rng or random.Random()
+    cols, rows = grid_shape
+
+    # Non-3×3 shapes use the procedural generator.
+    if cols != 3 or rows != 3:
+        return _build_procedural_graph(archetype, cols, rows, rng)
 
     if archetype == "GHOST":
         # Slum Alleys -> Warehouse Interior: tight corridors, fog, wire fences.
@@ -508,11 +615,26 @@ def build_room_graph(archetype: str, rng: Optional[random.Random] = None) -> Roo
             _sector("MW", "SLUM_ALLEYWAYS", guards=[GuardEntityConfig("MW", 1, 0, "patrol")]),
             _sector("MC", "OPEN_STREET"),
             _sector("ME", "URBAN_HIGHWAY", guards=[GuardEntityConfig("ME", 0, 1, "patrol")]),
-            _sector("NW", "WAREHOUSE_INTERIOR", props=["crate", "crate"],
+            _sector("NW", "WAREHOUSE_INTERIOR",
+                    props=[
+                        PropConfig("crate_stack", -2.5,  1.5, destructible=False),
+                        PropConfig("crate_stack",  2.5,  1.5, destructible=False),
+                        PropConfig("power_breaker", 0.0, -1.5, destructible=True,
+                                   interact_action="CUT_POWER"),
+                        PropConfig("alarm_panel",   3.0,  0.0, destructible=True,
+                                   interact_action="SABOTAGE"),
+                    ],
                     guards=[GuardEntityConfig("NW", -2, 0, "bodyguard", armored=True),
-                            GuardEntityConfig("NW", 2, 0, "bodyguard", armored=True)]),
-            _sector("NC", "FORTIFIED_PLAZA", guards=[GuardEntityConfig("NC", 0, 0, "sentry")]),
-            _sector("NE", "WATERFRONT_DOCKS"),
+                            GuardEntityConfig("NW",  2, 0, "bodyguard", armored=True)]),
+            _sector("NC", "FORTIFIED_PLAZA",
+                    props=[
+                        PropConfig("surveillance_spotlight", 0.0, 0.0),
+                    ],
+                    guards=[GuardEntityConfig("NC", 0, 0, "sentry")]),
+            _sector("NE", "WATERFRONT_DOCKS",
+                    props=[
+                        PropConfig("vent_shaft", 0.0, 0.0, connects_to="NW"),
+                    ]),
         ]
         connections = _edges({
             ("NW", "NC"): "open",
@@ -533,14 +655,21 @@ def build_room_graph(archetype: str, rng: Optional[random.Random] = None) -> Roo
     elif archetype == "WRECKING_BALL":
         # Industrial Depot -> Fortified Plaza: explosive barrels, concrete roadblocks, ramming vehicles.
         sectors = [
-            _sector("SW", "INDUSTRIAL_DEPOT", props=["fuel_barrel", "fuel_barrel"]),
-            _sector("SC", "INDUSTRIAL_DEPOT", props=["fuel_barrel"]),
+            _sector("SW", "INDUSTRIAL_DEPOT",
+                    props=[
+                        PropConfig("explosive_barrel", -3.0,  2.0, destructible=True),
+                        PropConfig("explosive_barrel",  2.0, -1.0, destructible=True),
+                    ]),
+            _sector("SC", "INDUSTRIAL_DEPOT",
+                    props=[PropConfig("explosive_barrel", 0.0, 0.0, destructible=True)]),
             _sector("SE", "VACANT_LOT"),
-            _sector("MW", "URBAN_HIGHWAY", props=["car"]),
+            _sector("MW", "URBAN_HIGHWAY", props=[PropConfig("car", 0.0, 0.0)]),
             _sector("MC", "FORTIFIED_PLAZA",
+                    props=[PropConfig("alarm_panel", 0.0, 2.5, destructible=True,
+                                     interact_action="SABOTAGE")],
                     guards=[GuardEntityConfig("MC", -2, 0, "bodyguard", armored=True),
-                            GuardEntityConfig("MC", 2, 0, "bodyguard", armored=True)]),
-            _sector("ME", "URBAN_HIGHWAY", props=["car"]),
+                            GuardEntityConfig("MC",  2, 0, "bodyguard", armored=True)]),
+            _sector("ME", "URBAN_HIGHWAY", props=[PropConfig("car", 0.0, 0.0)]),
             _sector("NW", "WAREHOUSE_INTERIOR"),
             _sector("NC", "OPEN_STREET"),
             _sector("NE", "WATERFRONT_DOCKS"),
@@ -564,14 +693,16 @@ def build_room_graph(archetype: str, rng: Optional[random.Random] = None) -> Roo
     elif archetype == "SPEEDRUNNER":
         # Urban Highway -> Waterfront Docks: direct road, roadblock chokepoints.
         sectors = [
-            _sector("SW", "URBAN_HIGHWAY", props=["car"]),
-            _sector("SC", "URBAN_HIGHWAY"),
+            _sector("SW", "URBAN_HIGHWAY", props=[PropConfig("car", 0.0, 0.0)]),
+            _sector("SC", "URBAN_HIGHWAY",
+                    props=[PropConfig("surveillance_spotlight", 0.0, 1.0)]),
             _sector("SE", "WATERFRONT_DOCKS"),
             _sector("MW", "OPEN_STREET"),
-            _sector("MC", "URBAN_HIGHWAY", props=["car"]),
+            _sector("MC", "URBAN_HIGHWAY", props=[PropConfig("car", 0.0, 0.0)]),
             _sector("ME", "URBAN_HIGHWAY"),
             _sector("NW", "VACANT_LOT"),
-            _sector("NC", "FORTIFIED_PLAZA"),
+            _sector("NC", "FORTIFIED_PLAZA",
+                    props=[PropConfig("surveillance_spotlight", 0.0, 0.0)]),
             _sector("NE", "WATERFRONT_DOCKS",
                     guards=[GuardEntityConfig("NE", 0, 1, "sentry"),
                             GuardEntityConfig("NE", 0, -1, "patrol")]),
@@ -662,4 +793,199 @@ def build_room_graph(archetype: str, rng: Optional[random.Random] = None) -> Roo
         target_sector=target_sector,
         player_spawn_sector=spawn_sector,
         extraction_sector=extraction_sector,
+        grid_dimensions=GridDimensions(columns=3, rows=3),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Procedural graph generator for non-3×3 grids (Leap 3)
+# ---------------------------------------------------------------------------
+
+# Archetype affinity: ordered preferred module lists for sector assignment.
+_ARCHETYPE_MODULE_AFFINITY: dict = {
+    "GHOST":        ["SLUM_ALLEYWAYS", "WAREHOUSE_INTERIOR", "VACANT_LOT",
+                     "OPEN_STREET", "FORTIFIED_PLAZA", "WATERFRONT_DOCKS",
+                     "URBAN_HIGHWAY", "INDUSTRIAL_DEPOT", "SECURITY_COMPOUND"],
+    "WRECKING_BALL": ["INDUSTRIAL_DEPOT", "FORTIFIED_PLAZA", "URBAN_HIGHWAY",
+                      "SECURITY_COMPOUND", "OPEN_STREET", "WAREHOUSE_INTERIOR",
+                      "SLUM_ALLEYWAYS", "WATERFRONT_DOCKS", "VACANT_LOT"],
+    "SPEEDRUNNER":  ["URBAN_HIGHWAY", "WATERFRONT_DOCKS", "OPEN_STREET",
+                     "FORTIFIED_PLAZA", "VACANT_LOT", "SLUM_ALLEYWAYS",
+                     "WAREHOUSE_INTERIOR", "INDUSTRIAL_DEPOT", "SECURITY_COMPOUND"],
+    "AGGRESSOR":    ["SECURITY_COMPOUND", "FORTIFIED_PLAZA", "URBAN_HIGHWAY",
+                     "INDUSTRIAL_DEPOT", "WAREHOUSE_INTERIOR", "OPEN_STREET",
+                     "SLUM_ALLEYWAYS", "WATERFRONT_DOCKS", "VACANT_LOT"],
+}
+_ARCHETYPE_MODULE_AFFINITY["BALANCED"]  = list(SECTOR_MODULES)
+_ARCHETYPE_MODULE_AFFINITY["TACTICIAN"] = list(SECTOR_MODULES)
+
+# Default edge-status weight tables per archetype: (status, weight)
+_ARCHETYPE_EDGE_WEIGHTS: dict = {
+    "GHOST":        [("open", 2), ("barricaded_wire_fence", 4), ("barricaded_concrete", 2), ("walled_off", 2)],
+    "WRECKING_BALL": [("open", 1), ("barricaded_wire_fence", 1), ("barricaded_concrete", 5), ("walled_off", 1)],
+    "SPEEDRUNNER":  [("open", 5), ("barricaded_wire_fence", 2), ("barricaded_concrete", 1), ("walled_off", 1)],
+    "AGGRESSOR":    [("open", 1), ("barricaded_wire_fence", 2), ("barricaded_concrete", 4), ("walled_off", 2)],
+    "BALANCED":     [("open", 3), ("barricaded_wire_fence", 3), ("barricaded_concrete", 2), ("walled_off", 1)],
+    "TACTICIAN":    [("open", 3), ("barricaded_wire_fence", 3), ("barricaded_concrete", 2), ("walled_off", 1)],
+}
+
+# Default grid shapes per archetype when Gemini picks a non-3×3 layout.
+_ARCHETYPE_DEFAULT_GRIDS: dict = {
+    "GHOST":        (2, 3),
+    "SPEEDRUNNER":  (2, 4),
+    "WRECKING_BALL": (3, 4),
+    "AGGRESSOR":    (3, 3),
+    "BALANCED":     (3, 3),
+    "TACTICIAN":    (3, 3),
+}
+
+
+def _build_procedural_graph(
+    archetype: str,
+    cols: int,
+    rows: int,
+    rng: random.Random,
+) -> RoomGraphManifest:
+    """
+    Programmatically assembles a valid RoomGraphManifest for any N×M grid.
+
+    Algorithm:
+      1. Generate sector coords and adjacency list.
+      2. Assign sector modules using archetype affinity weights (with shuffling).
+      3. Place spawn at bottom-left corner, target near top-right, extraction at top-left.
+      4. Assign edge statuses using weighted random draw, then run BFS to guarantee
+         spawn→target→extraction reachability, forcibly opening any blocking edge.
+      5. Place props using archetype-appropriate logic.
+    """
+    coords = generate_grid_coords(cols, rows)
+    adj    = generate_adjacency(cols, rows)
+
+    # ── 1. Sector module assignment ──────────────────────────────────────────
+    affinity = list(_ARCHETYPE_MODULE_AFFINITY.get(archetype, list(SECTOR_MODULES)))
+    # Pad affinity list if grid has more sectors than modules.
+    while len(affinity) < cols * rows:
+        affinity.extend(affinity)
+    module_pool = affinity[:cols * rows]
+    rng.shuffle(module_pool)
+    sectors = []
+    for i, (sid, (cx, cy)) in enumerate(coords.items()):
+        sectors.append(SectorConfig(id=sid, module=module_pool[i],
+                                     center_x=cx, center_y=cy))
+
+    # ── 2. Key sector placement ──────────────────────────────────────────────
+    # Row 0 = top (highest Y), last row = bottom (lowest Y).
+    all_ids = list(coords.keys())
+    spawn_id      = f"R{rows-1}_C0"            # bottom-left
+    target_id     = f"R0_C{cols-1}"            # top-right
+    extraction_id = f"R0_C0"                   # top-left
+    # If they all collapse to same cell (1×1 degenerate), fall back.
+    if spawn_id == target_id:
+        target_id = all_ids[len(all_ids) // 2] if len(all_ids) > 1 else spawn_id
+    if extraction_id == target_id or extraction_id == spawn_id:
+        remaining = [s for s in all_ids if s not in (spawn_id, target_id)]
+        extraction_id = remaining[0] if remaining else spawn_id
+
+    # ── 3. Edge status assignment ────────────────────────────────────────────
+    weights_table = _ARCHETYPE_EDGE_WEIGHTS.get(archetype, _ARCHETYPE_EDGE_WEIGHTS["BALANCED"])
+    statuses_pool = [s for (s, w) in weights_table for _ in range(w)]
+
+    connections = []
+    edge_status: dict = {}
+    for (a, b) in adj:
+        st = rng.choice(statuses_pool)
+        connections.append(ConnectionConfig(from_sector=a, to_sector=b, status=st))
+        edge_status[(a, b)] = st
+        edge_status[(b, a)] = st
+
+    # ── 4. Solvability guarantee (BFS repair) ────────────────────────────────
+    def _reachable(start, goal, es):
+        if start == goal:
+            return True
+        adj_map: dict = {}
+        for (a, b), st in es.items():
+            if st not in IMPASSABLE_STATUSES:
+                adj_map.setdefault(a, set()).add(b)
+        visited = {start}
+        frontier = list(adj_map.get(start, []))
+        while frontier:
+            nxt = []
+            for n in frontier:
+                if n == goal:
+                    return True
+                if n not in visited:
+                    visited.add(n)
+                    nxt.extend(adj_map.get(n, []))
+            frontier = nxt
+        return False
+
+    def _force_open_path(start, goal, es, conns):
+        """BFS to find any path (ignoring statuses); force-open edges along that path."""
+        if _reachable(start, goal, es):
+            return
+        # Build full adjacency ignoring impassable status.
+        adj_map: dict = {}
+        for (a, b) in adj:
+            adj_map.setdefault(a, set()).add(b)
+            adj_map.setdefault(b, set()).add(a)
+        # BFS to find path
+        parent: dict = {start: None}
+        frontier = [start]
+        found = False
+        while frontier and not found:
+            nxt = []
+            for n in frontier:
+                if n == goal:
+                    found = True
+                    break
+                for nb in adj_map.get(n, []):
+                    if nb not in parent:
+                        parent[nb] = n
+                        nxt.append(nb)
+            frontier = nxt
+        if not found:
+            return  # graph is disconnected — shouldn't happen for a grid
+        # Trace path and open blocking edges.
+        node = goal
+        while parent.get(node) is not None:
+            prev = parent[node]
+            key1, key2 = (prev, node), (node, prev)
+            if es.get(key1, "open") in IMPASSABLE_STATUSES:
+                es[key1] = "barricaded_wire_fence"
+                es[key2] = "barricaded_wire_fence"
+                for conn in conns:
+                    if (conn.from_sector == prev and conn.to_sector == node) or \
+                       (conn.from_sector == node and conn.to_sector == prev):
+                        conn.status = "barricaded_wire_fence"
+            node = prev
+
+    _force_open_path(spawn_id, target_id, edge_status, connections)
+    _force_open_path(target_id, extraction_id, edge_status, connections)
+
+    # ── 5. Props placement ───────────────────────────────────────────────────
+    prop_rules: dict = {
+        "GHOST":        {"target": [PropConfig("power_breaker", 0.0, -1.5, True, "CUT_POWER"),
+                                    PropConfig("alarm_panel",   3.0,  0.0, True, "SABOTAGE")],
+                         "random": [PropConfig("vent_shaft", 0.0, 0.0)]},
+        "WRECKING_BALL": {"random": [PropConfig("explosive_barrel", -2.0, 1.5, True),
+                                      PropConfig("car", 0.0, 0.0)]},
+        "SPEEDRUNNER":  {"random": [PropConfig("car", 0.0, 0.0),
+                                     PropConfig("surveillance_spotlight", 0.0, 0.0)]},
+        "AGGRESSOR":    {"target": [PropConfig("alarm_panel", -3.0, 0.0, True, "SABOTAGE"),
+                                     PropConfig("surveillance_spotlight", 3.0, 0.0)],
+                         "random": [PropConfig("explosive_barrel", 0.0, 0.0, True)]},
+    }
+    rules = prop_rules.get(archetype, {})
+    for sector in sectors:
+        if sector.id == target_id and rules.get("target"):
+            sector.props = list(rules["target"])
+        elif rules.get("random") and rng.random() < 0.4:
+            sector.props = [rng.choice(rules["random"])]
+
+    return RoomGraphManifest(
+        sectors=sectors,
+        connections=connections,
+        target_sector=target_id,
+        player_spawn_sector=spawn_id,
+        extraction_sector=extraction_id,
+        grid_dimensions=GridDimensions(columns=cols, rows=rows),
     )

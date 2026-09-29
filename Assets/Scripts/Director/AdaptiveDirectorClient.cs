@@ -63,23 +63,52 @@ namespace AdaptiveWorld2D.Director
         public bool armored;
     }
 
+    /// <summary>
+    /// Structured tactical prop placement within a sector (Leap 3).
+    /// Mirrors backend/target_solver.py's PropConfig exactly.
+    /// Supports: crate_stack, power_breaker, alarm_panel, explosive_barrel,
+    /// vent_shaft, surveillance_spotlight, car  (plus legacy: crate, fuel_barrel).
+    /// </summary>
+    [Serializable]
+    public class PropData
+    {
+        public string type;             // prop type identifier
+        public float offset_x;          // X offset from sector center
+        public float offset_y;          // Y offset from sector center
+        public bool destructible;       // whether this prop can take damage
+        public string interact_action;  // "CUT_POWER", "SABOTAGE", or ""
+        public string connects_to;      // for vent_shaft: destination sector id
+    }
+
+    /// <summary>Grid shape metadata for dynamic (non-3x3) layouts (Leap 3).
+    /// Absent/default -> legacy 3x3 behaviour.</summary>
+    [Serializable]
+    public class GridDimensions
+    {
+        public int columns = 3;
+        public int rows = 3;
+        public float cell_width  = 20f;
+        public float cell_height = 15f;
+    }
+
     // TargetBossConfig was removed — it mirrored backend/target_solver.py's TargetBossConfig but
     // was never populated in the live JSON payload. Boss stats live in TargetManifest; spatial
     // binding is handled via RoomGraphManifest.target_sector. Re-add if the backend starts sending it.
 
-    /// <summary>One cell of the 3x3 tactical sector grid (60x45 canvas, cells at
-    /// X = -20/0/+20, Y = +15/0/-15). Mirrors backend/target_solver.py's SectorConfig.</summary>
+    /// <summary>One cell of the dynamic tactical sector grid.
+    /// Mirrors backend/target_solver.py's SectorConfig.
+    /// id format: legacy 3x3 uses "NW".."SE"; dynamic grids use "R{row}_C{col}".</summary>
     [Serializable]
     public class SectorConfig
     {
-        public string id;       // "NW", "NC", "NE", "MW", "MC", "ME", "SW", "SC", "SE"
+        public string id;       // "NW".."SE" or "R0_C0".."R{r}_C{c}" for dynamic grids
         public string module;   // "WAREHOUSE_INTERIOR", "FORTIFIED_PLAZA", "SLUM_ALLEYWAYS",
                                  // "URBAN_HIGHWAY", "INDUSTRIAL_DEPOT", "WATERFRONT_DOCKS",
                                  // "SECURITY_COMPOUND", "OPEN_STREET", "VACANT_LOT"
         public float center_x;
         public float center_y;
         public List<GuardEntityConfig> guards = new List<GuardEntityConfig>();
-        public List<string> props = new List<string>();
+        public List<PropData> props = new List<PropData>();  // structured props (Leap 3)
     }
 
     /// <summary>A single edge between two adjacent sectors. Mirrors backend/target_solver.py's
@@ -102,13 +131,14 @@ namespace AdaptiveWorld2D.Director
     [Serializable]
     public class RoomGraphManifest
     {
+        public GridDimensions grid_dimensions;   // null → legacy 3×3 (backward-compatible)
         public List<SectorConfig> sectors = new List<SectorConfig>();
         public List<ConnectionConfig> connections = new List<ConnectionConfig>();
         public string target_sector;
         public string player_spawn_sector;
         public string extraction_sector;
 
-        /// <summary>Linear lookup by sector id (only 9 entries -- no need for a dictionary).</summary>
+        /// <summary>Linear lookup by sector id.</summary>
         public SectorConfig GetSector(string sectorId)
         {
             if (sectors == null) return null;
@@ -117,6 +147,12 @@ namespace AdaptiveWorld2D.Director
                 if (sectors[i] != null && sectors[i].id == sectorId) return sectors[i];
             }
             return null;
+        }
+
+        /// <summary>Returns the effective grid dimensions (defaults to 3x3 when absent).</summary>
+        public GridDimensions GetGridDimensions()
+        {
+            return grid_dimensions ?? new GridDimensions();
         }
     }
 
